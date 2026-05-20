@@ -1,0 +1,42 @@
+name: Daily Job Tracker
+
+on:
+  schedule:
+    # 8:00 AM PDT (UTC-7) = 15:00 UTC
+    - cron: "0 15 * * 1-5"   # weekdays only, Mon–Fri
+
+  workflow_dispatch:           # lets you trigger it manually from GitHub too
+
+jobs:
+  scrape-and-update:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write          # needed to commit jobs.xlsx back to repo
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run job scraper
+        env:
+          APIFY_API_KEY: ${{ secrets.APIFY_API_KEY }}
+        run: python scraper.py
+
+      - name: Commit updated jobs.xlsx
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add jobs.xlsx
+          git diff --cached --quiet || git commit -m "🤖 Daily job update — $(date +'%Y-%m-%d')"
+          git push
