@@ -1,92 +1,326 @@
 """
-Giri Vignesh — Daily Job Tracker
-Scrapes LinkedIn via Apify, scores jobs against your profile,
-and writes/updates jobs.xlsx in the repo.
+Giri Vignesh — Daily Internship Tracker
+Pulls live postings directly from Greenhouse / Lever / Ashby job-board APIs
+(no scraping, no blocking, no API key), filters to internship/co-op/
+fellowship/new-grad roles, scores them against your resume profile, writes/
+updates jobs.xlsx, and (if DISCORD_WEBHOOK_URL is set) posts a daily summary.
 """
 
 import os
+import re
 import json
 import time
-from datetime import datetime
-from apify_client import ApifyClient
+from datetime import datetime, timezone
+import requests
 import openpyxl
-from openpyxl.styles import (
-    PatternFill, Font, Alignment, Border, Side
-)
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.hyperlink import Hyperlink
 
 # ── Profile: Giri's skills and preferences ────────────────────────────────
 PROFILE = {
     "skills": [
-        "python", "javascript", "react", "flask", "node", "aws",
-        "mongodb", "rest", "api", "html", "css", "docker", "git",
-        "sql", "tensorflow", "pytorch", "keras", "nlp", "machine learning",
-        "full stack", "full-stack", "backend", "frontend", "c++", "c",
-        "next.js", "nextjs", "express", "llm", "agile", "ci/cd",
-        "postman", "oop", "data structures", "algorithms", "typescript"
+        "python", "javascript", "typescript", "react", "next.js", "nextjs",
+        "flask", "node", "node.js", "express", "mongodb", "sql", "rest",
+        "restful", "api", "html", "css", "docker", "git", "github", "aws",
+        "tensorflow", "pytorch", "keras", "nlp", "llm", "rag",
+        "retrieval augmented generation", "langchain", "embeddings",
+        "vector database", "machine learning", "deep learning",
+        "full stack", "full-stack", "backend", "frontend", "c++", "haskell",
+        "agile", "ci/cd", "postman", "oop", "data structures", "algorithms",
+        "web scraping", "beautifulsoup", "data analysis", "pandas",
+        "data analyst", "data analytics", "business analyst",
+        "data visualization", "tableau", "power bi", "excel", "kpi",
+        "a/b testing", "statistics", "artificial intelligence",
     ],
-    "preferred_locations": ["washington", "seattle", "bellevue", "redmond",
-                             "remote", "texas", "dallas", "austin", "houston"],
-    "target_titles": ["software engineer", "software developer", "swe",
-                      "full stack", "frontend", "backend", "junior developer",
-                      "jr developer", "jr. developer", "intern"],
-    "avoid_titles": ["senior", "staff", "principal", "manager", "director",
-                     "phd", "research scientist", "data scientist", "devops",
-                     "security engineer", "hardware"],
-    "preferred_levels": ["internship", "entry level", "entry_level",
-                          "associate", "junior"],
+    # Weighted higher than everything else — explicitly Seattle + remote per Giri's ask.
+    "preferred_locations": [
+        "seattle", "bellevue", "redmond", "kirkland", "washington",
+        "pullman", "remote",
+    ],
+    # Soft penalties applied to description text — title-level seniority is
+    # handled separately by HARD_AVOID_TITLE_RE (a hard drop, not a penalty).
+    "avoid_signals": [
+        "master's degree required", "msc required", "security clearance",
+        "must be a us citizen", "citizenship required",
+        "5+ years", "7+ years", "10+ years",
+    ],
 }
 
-# ── Search URLs ────────────────────────────────────────────────────────────
-SEARCH_URLS = [
-    # Washington internships
-    "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern&location=Washington+State&f_E=1%2C2&f_WT=1%2C2",
-    # Remote internships / junior
-    "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern&f_WT=2&f_E=1%2C2",
-    "https://www.linkedin.com/jobs/search/?keywords=junior+software+developer&f_WT=2&f_E=1%2C2",
-    # Texas
-    "https://www.linkedin.com/jobs/search/?keywords=junior+software+developer&location=Texas&f_E=1%2C2",
-    "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern&location=Texas&f_E=1%2C2",
-    # Full stack remote
-    "https://www.linkedin.com/jobs/search/?keywords=junior+full+stack+developer&f_WT=2&f_E=1%2C2",
+# Only these ATS platforms are queried — all are free, public, no-auth JSON
+# APIs, chosen specifically to replace the unreliable Apify/LinkedIn scrape.
+COMPANIES = [
+    # ── Seattle-area ──
+    {"name": "Smartsheet", "platform": "greenhouse", "token": "smartsheet"},
+    {"name": "Amperity", "platform": "greenhouse", "token": "amperity"},
+    {"name": "Textio", "platform": "greenhouse", "token": "textio"},
+    {"name": "Karat", "platform": "greenhouse", "token": "karat"},
+    {"name": "Xealth", "platform": "greenhouse", "token": "xealth"},
+    {"name": "Bungie", "platform": "greenhouse", "token": "bungie"},
+    {"name": "Rover", "platform": "lever", "token": "rover"},
+    {"name": "Outreach", "platform": "lever", "token": "outreach"},
+    {"name": "Highspot", "platform": "lever", "token": "highspot"},
+    {"name": "Qumulo", "platform": "ashby", "token": "qumulo"},
+    {"name": "PayScale", "platform": "ashby", "token": "payscale"},
+    {"name": "Adaptive Biotechnologies", "platform": "ashby", "token": "adaptive"},
+
+    # ── Remote-friendly / AI startups ──
+    {"name": "Anthropic", "platform": "greenhouse", "token": "anthropic"},
+    {"name": "OpenAI", "platform": "ashby", "token": "openai"},
+    {"name": "Perplexity", "platform": "ashby", "token": "perplexity"},
+    {"name": "Harvey", "platform": "ashby", "token": "harvey"},
+    {"name": "Sierra", "platform": "ashby", "token": "sierra"},
+    {"name": "Decagon", "platform": "ashby", "token": "decagon"},
+    {"name": "Cursor (Anysphere)", "platform": "ashby", "token": "cursor"},
+    {"name": "Modal", "platform": "ashby", "token": "modal"},
+    {"name": "Baseten", "platform": "ashby", "token": "baseten"},
+    {"name": "Notion", "platform": "ashby", "token": "notion"},
+    {"name": "Ramp", "platform": "ashby", "token": "ramp"},
+    {"name": "Linear", "platform": "ashby", "token": "linear"},
+    {"name": "Replit", "platform": "ashby", "token": "replit"},
+    {"name": "PostHog", "platform": "ashby", "token": "posthog"},
+    {"name": "Runway", "platform": "ashby", "token": "runway"},
+    {"name": "Zapier", "platform": "ashby", "token": "zapier"},
+    {"name": "Airbyte", "platform": "ashby", "token": "airbyte"},
+    {"name": "Temporal", "platform": "ashby", "token": "temporal"},
+    {"name": "Substack", "platform": "ashby", "token": "substack"},
+    {"name": "Together AI", "platform": "greenhouse", "token": "togetherai"},
+    {"name": "Fireworks AI", "platform": "greenhouse", "token": "fireworksai"},
+    {"name": "Mercury", "platform": "greenhouse", "token": "mercury"},
+    {"name": "Vercel", "platform": "greenhouse", "token": "vercel"},
+    {"name": "Webflow", "platform": "greenhouse", "token": "webflow"},
+    {"name": "Airtable", "platform": "greenhouse", "token": "airtable"},
+    {"name": "GitLab", "platform": "greenhouse", "token": "gitlab"},
+    {"name": "Cockroach Labs", "platform": "greenhouse", "token": "cockroachlabs"},
+    {"name": "Scale AI", "platform": "greenhouse", "token": "scaleai"},
+    {"name": "Turing", "platform": "greenhouse", "token": "turing"},
+    {"name": "Flexport", "platform": "greenhouse", "token": "flexport"},
+    {"name": "Whoop", "platform": "lever", "token": "whoop"},
+    {"name": "Confluent", "platform": "ashby", "token": "confluent"},
+    {"name": "Plaid", "platform": "ashby", "token": "plaid"},
+    {"name": "Sift", "platform": "ashby", "token": "sift"},
+
+    # ── Larger tech (still worth a look — via their public ATS) ──
+    {"name": "Stripe", "platform": "greenhouse", "token": "stripe"},
+    {"name": "Databricks", "platform": "greenhouse", "token": "databricks"},
+    {"name": "Figma", "platform": "greenhouse", "token": "figma"},
+    {"name": "Coinbase", "platform": "greenhouse", "token": "coinbase"},
+    {"name": "MongoDB", "platform": "greenhouse", "token": "mongodb"},
+    {"name": "Instacart", "platform": "greenhouse", "token": "instacart"},
+    {"name": "Reddit", "platform": "greenhouse", "token": "reddit"},
+    {"name": "Affirm", "platform": "greenhouse", "token": "affirm"},
+    {"name": "Asana", "platform": "greenhouse", "token": "asana"},
+    {"name": "Robinhood", "platform": "greenhouse", "token": "robinhood"},
+    {"name": "Discord", "platform": "greenhouse", "token": "discord"},
+    {"name": "Samsara", "platform": "greenhouse", "token": "samsara"},
+    {"name": "TripAdvisor", "platform": "greenhouse", "token": "tripadvisor"},
 ]
+
+# Only postings whose title looks like an internship / co-op / new-grad /
+# fellowship role are kept — everything else on these boards (senior/staff
+# SWE, etc.) is dropped before scoring so the sheet doesn't fill up with
+# irrelevant rows. Fellowship programs (e.g. Anthropic Fellows Program,
+# Scale AI's ML Fellow track) are treated the same as internships.
+INTERNSHIP_TITLE_RE = re.compile(
+    r"(?i)\b(intern(ship)?s?|co-?op|new grad|university grad|early career|"
+    r"fellow(ship)?s?)\b"
+)
+
+# "Early career"/"intern"/"fellow" also gets used for recruiting, sales, HR,
+# finance, and legal reqs on these boards (e.g. "Finance Fellow", "HRIS
+# Analyst", "Legal Fellow") — exclude non-engineering/non-data functions
+# outright so only AI/data-analytics/business-analyst/ML-flavored roles
+# that are actually compatible with the resume survive.
+NON_TECHNICAL_ROLE_RE = re.compile(
+    r"(?i)\b(recruit(er|ing)?|people (strategy|ops|operations|analytics|technology)|"
+    r"human resources|\bhr\b|hris|talent|human capital|sales|account executive|"
+    r"marketing|content (writer|strategist)|copywriter|"
+    r"finance|financial|accounting|accountant|payroll|legal|privacy|compliance|"
+    r"audit|procurement|supply chain|customer (success|support)|workday|"
+    r"medical|clinical)\b"
+)
+
+# Hard title exclusions — a rising-junior CS undergrad isn't eligible for
+# these regardless of keyword/skill overlap, so drop them before scoring.
+# Also covers grad-degree-track titles (Giri is undergrad-only).
+HARD_AVOID_TITLE_RE = re.compile(
+    r"(?i)\b(senior|staff|principal|director|manager|"
+    r"phd|ph\.d\.|postdoc(toral)?|research scientist|"
+    r"graduate program|master'?s?\s+student|phd student|"
+    r"doctoral( student)?|graduate researcher|mba)\b"
+)
+
+# Whole-domain exclusions — checked against title+description since these
+# fields sometimes only show up in the description, not the title. Not a
+# fit regardless of skill overlap.
+DOMAIN_EXCLUDE_RE = re.compile(
+    r"(?i)\b(cybersecurity|cyber security|security engineer|security analyst|"
+    r"infosec|information security|penetration test(ing|er)?|red team|"
+    r"blue team|soc analyst|application security|"
+    r"aerospace|avionics|satellite|spacecraft|propulsion|flight software|aircraft)\b"
+)
+
+MIN_SCORE_TO_INCLUDE = 40  # below this, a posting is dropped entirely (not just low-ranked)
+
+
+def skill_pattern(term: str) -> re.Pattern:
+    """Word-boundary-safe match so short/symbol-heavy skills (e.g. 'rag', 'api',
+    'oop') don't false-positive inside unrelated words ('storage', 'capital',
+    'cooperate')."""
+    return re.compile(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])")
+
+
+SKILL_PATTERNS = [(s, skill_pattern(s)) for s in PROFILE["skills"]]
+AVOID_PATTERNS = [(s, skill_pattern(s)) for s in PROFILE["avoid_signals"]]
+
+
+# ── Fetchers ──────────────────────────────────────────────────────────────
+def strip_html(html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fetch_greenhouse(company: dict) -> list[dict]:
+    token = company["token"]
+    url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+    r = requests.get(url, timeout=15)
+    r.raise_for_status()
+    jobs = []
+    for j in r.json().get("jobs", []):
+        offices = j.get("offices") or []
+        location = j.get("location", {}).get("name") or (offices[0]["name"] if offices else "")
+        jobs.append({
+            "id": f"gh:{token}:{j['id']}",
+            "title": j.get("title", ""),
+            "companyName": company["name"],
+            "location": location,
+            "descriptionText": strip_html(j.get("content", "")),
+            "link": j.get("absolute_url", ""),
+            "postedAt": j.get("updated_at", ""),
+        })
+    return jobs
+
+
+def fetch_lever(company: dict) -> list[dict]:
+    token = company["token"]
+    url = f"https://api.lever.co/v0/postings/{token}?mode=json"
+    r = requests.get(url, timeout=15)
+    r.raise_for_status()
+    jobs = []
+    for j in r.json():
+        cats = j.get("categories", {}) or {}
+        jobs.append({
+            "id": f"lever:{token}:{j['id']}",
+            "title": j.get("text", ""),
+            "companyName": company["name"],
+            "location": cats.get("location", ""),
+            "descriptionText": strip_html(j.get("descriptionPlain") or j.get("description", "")),
+            "link": j.get("hostedUrl", ""),
+            "postedAt": datetime.fromtimestamp(
+                j.get("createdAt", 0) / 1000, tz=timezone.utc
+            ).isoformat() if j.get("createdAt") else "",
+        })
+    return jobs
+
+
+def fetch_ashby(company: dict) -> list[dict]:
+    token = company["token"]
+    url = f"https://api.ashbyhq.com/posting-api/job-board/{token}"
+    r = requests.get(url, timeout=15)
+    r.raise_for_status()
+    jobs = []
+    for j in r.json().get("jobs", []):
+        location = j.get("location", "")
+        if j.get("isRemote") and "remote" not in location.lower():
+            location = f"{location} (Remote)".strip()
+        jobs.append({
+            "id": f"ashby:{token}:{j['id']}",
+            "title": j.get("title", ""),
+            "companyName": company["name"],
+            "location": location,
+            "descriptionText": strip_html(j.get("descriptionHtml") or ""),
+            "link": j.get("jobUrl", ""),
+            "postedAt": j.get("publishedAt", ""),
+        })
+    return jobs
+
+
+FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetch_ashby}
+
+
+def scrape_jobs() -> list[dict]:
+    all_jobs = []
+    for company in COMPANIES:
+        fetcher = FETCHERS[company["platform"]]
+        try:
+            jobs = fetcher(company)
+            internship_jobs = [
+                j for j in jobs
+                if INTERNSHIP_TITLE_RE.search(j["title"])
+                and not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            ]
+            print(f"{company['name']:28s} ({company['platform']:10s}): "
+                  f"{len(jobs):4d} total, {len(internship_jobs):3d} internship-tagged")
+            all_jobs.extend(internship_jobs)
+        except Exception as e:
+            print(f"{company['name']:28s} ({company['platform']:10s}): FAILED — {e}")
+        time.sleep(0.3)  # be polite to free public APIs
+    return all_jobs
+
 
 # ── Scoring ────────────────────────────────────────────────────────────────
 def score_job(job: dict) -> tuple[int, list[str]]:
     """
-    Returns (score 0-100, list of matched keywords).
+    Returns (score 0-100, list of matched reasons).
     Breakdown:
-      - Skill keyword match  : 0-40 pts
-      - Location preference  : 0-20 pts
-      - Title match          : 0-20 pts
-      - Applicant count      : 0-20 pts (fewer = better)
+      - Skill keyword match   : 0-35 pts
+      - Title / role fit      : 0-25 pts
+      - Location preference   : 0-20 pts
+      - Recency                : 0-20 pts
+      - Negative signals       : subtracted, floor 0
     """
+    title = (job.get("title") or "").lower()
+    location = (job.get("location") or "").lower()
+    description = (job.get("descriptionText") or "").lower()
+    full_text = f"{title} {description}"
+
+    # ── Hard title filter — drop regardless of skill/keyword overlap ──────
+    if HARD_AVOID_TITLE_RE.search(title):
+        return 0, [f"filtered: '{HARD_AVOID_TITLE_RE.search(title).group(0)}' in title"]
+
+    # ── Domain exclusion — cybersecurity / aerospace, title or description ─
+    domain_hit = DOMAIN_EXCLUDE_RE.search(full_text)
+    if domain_hit:
+        return 0, [f"filtered: '{domain_hit.group(0)}' (excluded domain)"]
+
     reasons = []
     score = 0
 
-    title       = (job.get("title") or "").lower()
-    company     = (job.get("companyName") or "").lower()
-    location    = (job.get("location") or "").lower()
-    description = (job.get("descriptionText") or "").lower()
-    level       = (job.get("seniorityLevel") or "").lower()
-    applicants  = job.get("applicantsCount") or 999
-    full_text   = f"{title} {description}"
-
-    # ── Avoid filter ──────────────────────────────────────────────────────
-    for bad in PROFILE["avoid_titles"]:
-        if bad in title:
-            return 0, [f"filtered: '{bad}' in title"]
-
-    # ── Skill match (0-40) ────────────────────────────────────────────────
-    matched_skills = []
-    for skill in PROFILE["skills"]:
-        if skill in full_text:
-            matched_skills.append(skill)
-    skill_score = min(40, len(matched_skills) * 4)
+    # ── Skill match (0-35) ────────────────────────────────────────────────
+    matched_skills = [s for s, pat in SKILL_PATTERNS if pat.search(full_text)]
+    if len(matched_skills) < 2:
+        # A single keyword hit is too weak a signal on its own (e.g. an
+        # accounting internship mentioning "Excel", or boilerplate template
+        # text a company reuses across unrelated fellowship tracks) —
+        # require at least 2 real overlaps before treating it as a fit.
+        return 0, ["filtered: insufficient technical skill overlap"]
+    skill_score = min(35, len(matched_skills) * 3)
     score += skill_score
-    if matched_skills:
-        reasons.append(f"Skills: {', '.join(matched_skills[:6])}")
+    reasons.append(f"Skills: {', '.join(matched_skills[:6])}")
+
+    # ── Title / role fit (0-25) ───────────────────────────────────────────
+    if re.search(r"\bintern(ship)?s?\b", title):
+        score += 25
+        reasons.append("Internship title")
+    elif re.search(r"fellow(ship)?s?", title):
+        score += 23
+        reasons.append("Fellowship title")
+    elif re.search(r"co-?op", title):
+        score += 20
+        reasons.append("Co-op title")
+    elif re.search(r"new grad|university grad|early career", title):
+        score += 12
+        reasons.append("New-grad title")
 
     # ── Location (0-20) ───────────────────────────────────────────────────
     for loc in PROFILE["preferred_locations"]:
@@ -95,67 +329,46 @@ def score_job(job: dict) -> tuple[int, list[str]]:
             reasons.append(f"Location: {job.get('location')}")
             break
 
-    # ── Title match (0-20) ────────────────────────────────────────────────
-    title_score = 0
-    for t in PROFILE["target_titles"]:
-        if t in title:
-            title_score = 20
-            reasons.append(f"Title match: {job.get('title')}")
-            break
-    score += title_score
+    # ── Recency (0-20) ────────────────────────────────────────────────────
+    posted_at = job.get("postedAt")
+    if posted_at:
+        try:
+            posted_dt = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
+            days_old = (datetime.now(timezone.utc) - posted_dt).days
+            if days_old <= 7:
+                score += 20
+                reasons.append("Posted <7d ago")
+            elif days_old <= 14:
+                score += 14
+            elif days_old <= 30:
+                score += 8
+            else:
+                score += 2
+        except Exception:
+            pass
 
-    # ── Applicant count (0-20) ────────────────────────────────────────────
-    if isinstance(applicants, int):
-        if applicants < 30:
-            app_score = 20
-        elif applicants < 75:
-            app_score = 16
-        elif applicants < 125:
-            app_score = 12
-        elif applicants < 175:
-            app_score = 6
-        else:
-            app_score = 2
-        score += app_score
-        reasons.append(f"{applicants} applicants")
+    # ── Negative signals ──────────────────────────────────────────────────
+    penalties = [bad for bad, pat in AVOID_PATTERNS if pat.search(full_text)]
+    if re.search(r"(?<![a-z])phd(?![a-z])|ph\.d\.", full_text):
+        penalties.append("PhD-oriented role")
+    for _ in penalties:
+        score -= 15
+    if penalties:
+        reasons.append(f"Flags: {', '.join(penalties[:3])}")
 
-    return min(score, 100), reasons
+    return max(0, min(score, 100)), reasons
 
 
 def chance_label(score: int) -> str:
-    if score >= 65: return "High"
-    if score >= 45: return "Medium"
-    if score >= 25: return "Low"
-    return "Very Low"
+    if score >= 70: return "Strong Fit"
+    if score >= 55: return "Good Fit"
+    return "Possible Fit"
 
 
 def chance_color(score: int) -> str:
-    """Returns hex fill color for the chance cell."""
-    if score >= 65: return "C6EFCE"   # green
-    if score >= 45: return "FFEB9C"   # yellow
-    if score >= 25: return "FFCC99"   # orange
-    return "FFC7CE"                    # red
-
-
-# ── Apify scrape ──────────────────────────────────────────────────────────
-def scrape_jobs(api_key: str) -> list[dict]:
-    client = ApifyClient(api_key)
-    print("Starting Apify scrape...")
-
-    run = client.actor("curious_coder/linkedin-jobs-scraper").call(
-        run_input={
-            "urls": SEARCH_URLS,
-            "count": 25,
-            "scrapeCompany": False,
-        }
-    )
-
-    items = []
-    for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-        items.append(item)
-
-    print(f"Scraped {len(items)} jobs.")
-    return items
+    if score >= 70: return "C6EFCE"   # green
+    if score >= 55: return "FFEB9C"   # yellow
+    return "FFCC99"                    # orange
 
 
 # ── Deduplicate against existing sheet ───────────────────────────────────
@@ -165,11 +378,7 @@ def load_existing_ids(path: str) -> set:
     try:
         wb = openpyxl.load_workbook(path)
         ws = wb.active
-        ids = set()
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if row[0]:
-                ids.add(str(row[0]))
-        return ids
+        return {str(row[0]) for row in ws.iter_rows(min_row=2, values_only=True) if row[0]}
     except Exception:
         return set()
 
@@ -177,137 +386,188 @@ def load_existing_ids(path: str) -> set:
 # ── Excel builder ─────────────────────────────────────────────────────────
 HEADERS = [
     "Job ID", "Date Found", "Title", "Company", "Location",
-    "Match %", "Chance", "Applicants", "Employment Type",
-    "Key Skills Matched", "Link", "Status", "Notes"
+    "Match %", "Fit", "Source", "Why It Matched", "Link", "Status", "Notes"
 ]
 
-COL_WIDTHS = [14, 12, 32, 22, 20, 10, 10, 12, 16, 36, 14, 14, 24]
+COL_WIDTHS = [24, 12, 34, 24, 20, 10, 13, 10, 40, 14, 14, 24]
 
-NAVY   = "1A3A5C"
-WHITE  = "FFFFFF"
-LIGHT  = "F2F5F9"
+NAVY = "1A3A5C"
+WHITE = "FFFFFF"
+LIGHT = "F2F5F9"
 BORDER_COLOR = "CCCCCC"
+
 
 def thin_border():
     s = Side(style="thin", color=BORDER_COLOR)
     return Border(left=s, right=s, top=s, bottom=s)
 
 
-def write_excel(jobs_scored: list[dict], path: str):
-    """
-    If jobs.xlsx exists: append new rows only (dedup by job ID).
-    If not: create fresh with header + all jobs.
-    """
+def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
+    """Returns the (job, score) pairs actually written — used to build the
+    Discord notification so it only reports what's genuinely new today."""
     existing_ids = load_existing_ids(path)
+    added = []
 
     if os.path.exists(path):
         wb = openpyxl.load_workbook(path)
         ws = wb.active
-        new_count = 0
         for job in jobs_scored:
-            job_id = str(job.get("id", ""))
-            if job_id in existing_ids:
+            if job["id"] in existing_ids:
                 continue
-            _append_row(ws, job)
-            new_count += 1
-        print(f"Added {new_count} new jobs to existing sheet.")
+            score = _append_row(ws, job)
+            if score is not None:
+                added.append((job, score))
+        print(f"Added {len(added)} new internship postings to existing sheet.")
     else:
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = "Job Matches"
+        ws.title = "Internship Matches"
         _write_header(ws)
         for job in jobs_scored:
-            _append_row(ws, job)
-        print(f"Created new sheet with {len(jobs_scored)} jobs.")
+            score = _append_row(ws, job)
+            if score is not None:
+                added.append((job, score))
+        print(f"Created new sheet with {len(added)} internship postings.")
 
-    # freeze top row, set column widths
     ws.freeze_panes = "A2"
     for i, width in enumerate(COL_WIDTHS, 1):
         ws.column_dimensions[get_column_letter(i)].width = width
-
-    # auto-filter
     ws.auto_filter.ref = ws.dimensions
 
     wb.save(path)
     print(f"Saved to {path}")
+    return added
 
 
 def _write_header(ws):
     for col, header in enumerate(HEADERS, 1):
         cell = ws.cell(row=1, column=col, value=header)
-        cell.font       = Font(bold=True, color=WHITE, name="Arial", size=10)
-        cell.fill       = PatternFill("solid", fgColor=NAVY)
-        cell.alignment  = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border     = thin_border()
+        cell.font = Font(bold=True, color=WHITE, name="Arial", size=10)
+        cell.fill = PatternFill("solid", fgColor=NAVY)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border()
     ws.row_dimensions[1].height = 22
 
 
-def _append_row(ws, job: dict):
+def _append_row(ws, job: dict) -> int | None:
     score, reasons = score_job(job)
-    if score == 0:
-        return  # filtered out
+    if score < MIN_SCORE_TO_INCLUDE:
+        return None  # not a strong enough fit — don't clutter the sheet
 
     row = ws.max_row + 1
     fill_color = LIGHT if row % 2 == 0 else WHITE
+    source = job["id"].split(":")[0].capitalize()
 
     values = [
-        str(job.get("id", "")),
+        job["id"],
         datetime.today().strftime("%Y-%m-%d"),
         job.get("title", ""),
         job.get("companyName", ""),
         job.get("location", ""),
         score,
         chance_label(score),
-        job.get("applicantsCount", ""),
-        job.get("employmentType", ""),
-        ", ".join(reasons[:3]),
-        job.get("link") or job.get("jobUrl", ""),
+        source,
+        ", ".join(reasons[:4]),
+        job.get("link", ""),
         "Not Applied",
-        ""
+        "",
     ]
 
     for col, val in enumerate(values, 1):
         cell = ws.cell(row=row, column=col, value=val)
-        cell.font      = Font(name="Arial", size=9)
-        cell.alignment = Alignment(vertical="center", wrap_text=(col in [3, 10]))
-        cell.border    = thin_border()
-
-        # row zebra stripe
+        cell.font = Font(name="Arial", size=9)
+        cell.alignment = Alignment(vertical="center", wrap_text=(col in [3, 9]))
+        cell.border = thin_border()
         if col not in [6, 7]:
             cell.fill = PatternFill("solid", fgColor=fill_color)
 
-    # Match % — colored by score
     pct_cell = ws.cell(row=row, column=6)
-    pct_cell.value     = f"{score}%"
-    pct_cell.font      = Font(name="Arial", size=9, bold=True)
-    pct_cell.fill      = PatternFill("solid", fgColor=chance_color(score))
+    pct_cell.value = f"{score}%"
+    pct_cell.font = Font(name="Arial", size=9, bold=True)
+    pct_cell.fill = PatternFill("solid", fgColor=chance_color(score))
     pct_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Chance label
     ch_cell = ws.cell(row=row, column=7)
-    ch_cell.fill      = PatternFill("solid", fgColor=chance_color(score))
+    ch_cell.fill = PatternFill("solid", fgColor=chance_color(score))
     ch_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Link — make it clickable
-    link = values[10]
+    link = values[9]
     if link:
-        link_cell = ws.cell(row=row, column=11, value="Apply →")
+        link_cell = ws.cell(row=row, column=10, value="Apply →")
         link_cell.hyperlink = link
-        link_cell.font      = Font(name="Arial", size=9, color="185FA5", underline="single")
+        link_cell.font = Font(name="Arial", size=9, color="185FA5", underline="single")
         link_cell.alignment = Alignment(horizontal="center", vertical="center")
 
     ws.row_dimensions[row].height = 18
+    return score
+
+
+# ── Discord notification ──────────────────────────────────────────────────
+def notify_discord(webhook_url: str, added: list[tuple[dict, int]], companies_scanned: int, xlsx_path: str):
+    today = datetime.today().strftime("%Y-%m-%d")
+
+    if not added:
+        payload = {
+            "embeds": [{
+                "title": "🎯 Daily Internship Tracker",
+                "description": f"Ran today ({today}) — no new matches across {companies_scanned} companies. Full sheet attached below.",
+                "color": 0x1A3A5C,
+            }]
+        }
+    else:
+        added_sorted = sorted(added, key=lambda pair: pair[1], reverse=True)
+        lines = []
+        for job, score in added_sorted[:10]:
+            fit = chance_label(score)
+            lines.append(
+                f"**{score}% {fit}** — {job.get('title', '')} @ {job.get('companyName', '')}\n"
+                f"[Apply]({job.get('link', '')})"
+            )
+        description = "\n\n".join(lines)
+        if len(added_sorted) > 10:
+            description += f"\n\n...and {len(added_sorted) - 10} more in the sheet."
+        description += "\n\nFull sheet (all matches to date) attached below."
+
+        payload = {
+            "embeds": [{
+                "title": f"🎯 {len(added)} New Internship/Fellowship Match(es) — {today}",
+                "description": description,
+                "color": 0x2ECC71,
+                "footer": {"text": f"Scanned {companies_scanned} companies"},
+            }]
+        }
+
+    try:
+        if os.path.exists(xlsx_path):
+            with open(xlsx_path, "rb") as f:
+                r = requests.post(
+                    webhook_url,
+                    data={"payload_json": json.dumps(payload)},
+                    files={"file": ("jobs.xlsx", f,
+                                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                    timeout=30,
+                )
+        else:
+            r = requests.post(webhook_url, json=payload, timeout=15)
+        r.raise_for_status()
+        print("Discord notification sent (with jobs.xlsx attached).")
+    except Exception as e:
+        print(f"Discord notification FAILED (non-fatal): {e}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    api_key = os.environ.get("APIFY_API_KEY")
-    if not api_key:
-        raise ValueError("APIFY_API_KEY environment variable not set.")
-
     output_path = os.path.join(os.path.dirname(__file__), "jobs.xlsx")
 
-    jobs = scrape_jobs(api_key)
-    write_excel(jobs, output_path)
+    jobs = scrape_jobs()
+    print(f"\n{len(jobs)} internship-tagged postings found across {len(COMPANIES)} companies.")
 
-    print(f"\n✅ Done — {datetime.today().strftime('%Y-%m-%d %H:%M')} PST")
+    added = write_excel(jobs, output_path)
+
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if webhook_url:
+        notify_discord(webhook_url, added, len(COMPANIES), output_path)
+    else:
+        print("DISCORD_WEBHOOK_URL not set — skipping Discord notification.")
+
+    print(f"\nDone — {datetime.today().strftime('%Y-%m-%d %H:%M')} PST")

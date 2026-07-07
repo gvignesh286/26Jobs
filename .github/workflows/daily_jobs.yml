@@ -30,7 +30,7 @@ jobs:
 
       - name: Run job scraper
         env:
-          APIFY_API_KEY: ${{ secrets.APIFY_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python scraper.py
 
       - name: Commit updated jobs.xlsx
