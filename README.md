@@ -23,13 +23,14 @@ These are JSON APIs meant to be publicly readable (they power the "Careers" page
 3. **Hard seniority / grad-level filter** — titles containing `senior`, `staff`, `principal`, `director`, `manager`, `PhD`, `research scientist`, `master's student`, `doctoral`, `graduate researcher`, or `MBA` are dropped outright, no matter how many skills match. **Only undergraduate-eligible roles survive** (internship / co-op / fellowship / new-grad) — nothing requiring an in-progress or completed graduate degree.
 4. **Domain exclusion** — cybersecurity (security engineer/analyst, infosec, pentesting, red/blue team), aerospace (aerospace, avionics, satellite, spacecraft, propulsion, flight software), and non-CS functions (finance, legal, accounting, medical/clinical, HR, sales, marketing) are dropped, checked against both title *and* description so a generic "Software Engineer Intern" on an aerospace team, or a "Medical Fellow" track sharing boilerplate text with an ML fellowship, still gets excluded.
 5. **Skill requirement** — needs at least 2 real skill/keyword overlaps with your profile; a single generic hit (e.g. an accounting internship mentioning "Excel") isn't enough.
-6. **Scoring (0-100)** for everything that survives:
+6. **US-only** — any posting whose location names a foreign country/city (London, Toronto, Bangalore, Sydney, etc.) is dropped outright, regardless of score.
+7. **Scoring (0-100)** for everything that survives:
    - Skill/keyword overlap with your profile (including AI/data-analytics/business-analyst/ML terms) — 0-35 pts
    - Internship > fellowship > co-op > new-grad title strength — 0-25 pts
    - Seattle/WA or remote location — 0-20 pts
    - Recency (posted <7/14/30 days ago) — 0-20 pts
    - Penalties for "5+ years experience", "master's degree required", "security clearance", or any PhD mention — -15 pts each
-6. Only postings scoring **40+** get written to the sheet at all — the point is a short, high-confidence list, not everything ranked.
+8. Only postings scoring **50+** get written to the sheet at all — the point is a short, high-confidence list, not everything ranked.
 
 ## Setup (one time, ~5 minutes)
 
@@ -61,7 +62,7 @@ Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns:
 | Column | What it shows |
 |---|---|
 | Match % | Fit score, color coded |
-| Fit | Strong Fit (70+) / Good Fit (55+) / Possible Fit (40+) |
+| Fit | Strong Fit (70+) / Good Fit (55+) / Possible Fit (50+) |
 | Source | Which ATS it came from (gh / lever / ashby) |
 | Why It Matched | The specific skills/signals that drove the score |
 | Link | Click "Apply →" to go straight to the posting |
@@ -80,5 +81,6 @@ All of this lives at the top of `scraper.py`:
 - `PROFILE["skills"]` — add/remove keywords as your stack changes (e.g. once your RAG/stock-analyzer work is resume-ready, keywords like `rag`, `langchain`, `embeddings` are already in here)
 - `PROFILE["preferred_locations"]` — currently Seattle-area + remote only; add other states back if you widen the search
 - `COMPANIES` — add more companies as you find their board tokens
-- `MIN_SCORE_TO_INCLUDE` — raise it (e.g. to 55) if 40 is still surfacing too much; lower it if the list feels too thin
+- `MIN_SCORE_TO_INCLUDE` — currently 50; raise it further (e.g. to 60) if that's still surfacing too much, or lower it if the list feels too thin
+- `NON_US_LOCATION_RE` — the sheet is US-only right now; remove a country/city from this pattern (or drop the check in `score_job` entirely) if you want to reopen it to a specific country
 - `INTERNSHIP_TITLE_RE` — loosen this if you also want full-time junior/new-grad SWE roles, not just internships
