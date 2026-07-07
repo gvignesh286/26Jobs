@@ -159,7 +159,23 @@ DOMAIN_EXCLUDE_RE = re.compile(
     r"aerospace|avionics|satellite|spacecraft|propulsion|flight software|aircraft)\b"
 )
 
-MIN_SCORE_TO_INCLUDE = 40  # below this, a posting is dropped entirely (not just low-ranked)
+# US-only — checked against the location field. Blocklist approach (rather
+# than a US-city whitelist) since ATS location strings are free-text and a
+# whitelist would miss valid US cities; every non-US posting seen in testing
+# named a specific foreign country/city, so blocking those is reliable.
+NON_US_LOCATION_RE = re.compile(
+    r"(?i)\b(united kingdom|\buk\b|london|belgrade|serbia|sydney|melbourne|"
+    r"australia|canada|toronto|vancouver|montreal|india|bangalore|delhi|"
+    r"mumbai|hyderabad|singapore|germany|berlin|munich|france|paris|"
+    r"ireland|dublin|netherlands|amsterdam|spain|madrid|barcelona|italy|"
+    r"milan|rome|japan|tokyo|china|beijing|shanghai|brazil|sao paulo|"
+    r"mexico|poland|warsaw|portugal|lisbon|switzerland|zurich|sweden|"
+    r"stockholm|denmark|copenhagen|norway|oslo|israel|tel aviv|"
+    r"philippines|manila|vietnam|indonesia|jakarta|malaysia|"
+    r"south africa|new zealand|austria|vienna|belgium|brussels)\b"
+)
+
+MIN_SCORE_TO_INCLUDE = 50  # below this, a posting is dropped entirely (not just low-ranked)
 
 
 def skill_pattern(term: str) -> re.Pattern:
@@ -292,6 +308,11 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     domain_hit = DOMAIN_EXCLUDE_RE.search(full_text)
     if domain_hit:
         return 0, [f"filtered: '{domain_hit.group(0)}' (excluded domain)"]
+
+    # ── US-only — drop anything whose location names a foreign country/city ─
+    non_us_hit = NON_US_LOCATION_RE.search(location)
+    if non_us_hit:
+        return 0, [f"filtered: '{non_us_hit.group(0)}' (non-US location)"]
 
     reasons = []
     score = 0
