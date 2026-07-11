@@ -48,71 +48,142 @@ PROFILE = {
 
 # Only these ATS platforms are queried — all are free, public, no-auth JSON
 # APIs, chosen specifically to replace the unreliable Apify/LinkedIn scrape.
+# "startup" tags which companies land on the separate "Startups" sheet tab —
+# True for private/venture-funded companies, False for public/large-cap ones.
 COMPANIES = [
     # ── Seattle-area ──
-    {"name": "Smartsheet", "platform": "greenhouse", "token": "smartsheet"},
-    {"name": "Amperity", "platform": "greenhouse", "token": "amperity"},
-    {"name": "Textio", "platform": "greenhouse", "token": "textio"},
-    {"name": "Karat", "platform": "greenhouse", "token": "karat"},
-    {"name": "Xealth", "platform": "greenhouse", "token": "xealth"},
-    {"name": "Bungie", "platform": "greenhouse", "token": "bungie"},
-    {"name": "Rover", "platform": "lever", "token": "rover"},
-    {"name": "Outreach", "platform": "lever", "token": "outreach"},
-    {"name": "Highspot", "platform": "lever", "token": "highspot"},
-    {"name": "Qumulo", "platform": "ashby", "token": "qumulo"},
-    {"name": "PayScale", "platform": "ashby", "token": "payscale"},
-    {"name": "Adaptive Biotechnologies", "platform": "ashby", "token": "adaptive"},
+    {"name": "Smartsheet", "platform": "greenhouse", "token": "smartsheet", "startup": False},
+    {"name": "Amperity", "platform": "greenhouse", "token": "amperity", "startup": True},
+    {"name": "Textio", "platform": "greenhouse", "token": "textio", "startup": True},
+    {"name": "Karat", "platform": "greenhouse", "token": "karat", "startup": True},
+    {"name": "Xealth", "platform": "greenhouse", "token": "xealth", "startup": True},
+    {"name": "Bungie", "platform": "greenhouse", "token": "bungie", "startup": False},
+    {"name": "Rover", "platform": "lever", "token": "rover", "startup": False},
+    {"name": "Outreach", "platform": "lever", "token": "outreach", "startup": True},
+    {"name": "Highspot", "platform": "lever", "token": "highspot", "startup": True},
+    {"name": "Qumulo", "platform": "ashby", "token": "qumulo", "startup": True},
+    {"name": "PayScale", "platform": "ashby", "token": "payscale", "startup": True},
+    {"name": "Adaptive Biotechnologies", "platform": "ashby", "token": "adaptive", "startup": False},
 
     # ── Remote-friendly / AI startups ──
-    {"name": "Anthropic", "platform": "greenhouse", "token": "anthropic"},
-    {"name": "OpenAI", "platform": "ashby", "token": "openai"},
-    {"name": "Perplexity", "platform": "ashby", "token": "perplexity"},
-    {"name": "Harvey", "platform": "ashby", "token": "harvey"},
-    {"name": "Sierra", "platform": "ashby", "token": "sierra"},
-    {"name": "Decagon", "platform": "ashby", "token": "decagon"},
-    {"name": "Cursor (Anysphere)", "platform": "ashby", "token": "cursor"},
-    {"name": "Modal", "platform": "ashby", "token": "modal"},
-    {"name": "Baseten", "platform": "ashby", "token": "baseten"},
-    {"name": "Notion", "platform": "ashby", "token": "notion"},
-    {"name": "Ramp", "platform": "ashby", "token": "ramp"},
-    {"name": "Linear", "platform": "ashby", "token": "linear"},
-    {"name": "Replit", "platform": "ashby", "token": "replit"},
-    {"name": "PostHog", "platform": "ashby", "token": "posthog"},
-    {"name": "Runway", "platform": "ashby", "token": "runway"},
-    {"name": "Zapier", "platform": "ashby", "token": "zapier"},
-    {"name": "Airbyte", "platform": "ashby", "token": "airbyte"},
-    {"name": "Temporal", "platform": "ashby", "token": "temporal"},
-    {"name": "Substack", "platform": "ashby", "token": "substack"},
-    {"name": "Together AI", "platform": "greenhouse", "token": "togetherai"},
-    {"name": "Fireworks AI", "platform": "greenhouse", "token": "fireworksai"},
-    {"name": "Mercury", "platform": "greenhouse", "token": "mercury"},
-    {"name": "Vercel", "platform": "greenhouse", "token": "vercel"},
-    {"name": "Webflow", "platform": "greenhouse", "token": "webflow"},
-    {"name": "Airtable", "platform": "greenhouse", "token": "airtable"},
-    {"name": "GitLab", "platform": "greenhouse", "token": "gitlab"},
-    {"name": "Cockroach Labs", "platform": "greenhouse", "token": "cockroachlabs"},
-    {"name": "Scale AI", "platform": "greenhouse", "token": "scaleai"},
-    {"name": "Turing", "platform": "greenhouse", "token": "turing"},
-    {"name": "Flexport", "platform": "greenhouse", "token": "flexport"},
-    {"name": "Whoop", "platform": "lever", "token": "whoop"},
-    {"name": "Confluent", "platform": "ashby", "token": "confluent"},
-    {"name": "Plaid", "platform": "ashby", "token": "plaid"},
-    {"name": "Sift", "platform": "ashby", "token": "sift"},
+    {"name": "Anthropic", "platform": "greenhouse", "token": "anthropic", "startup": True},
+    {"name": "OpenAI", "platform": "ashby", "token": "openai", "startup": True},
+    {"name": "Perplexity", "platform": "ashby", "token": "perplexity", "startup": True},
+    {"name": "Harvey", "platform": "ashby", "token": "harvey", "startup": True},
+    {"name": "Sierra", "platform": "ashby", "token": "sierra", "startup": True},
+    {"name": "Decagon", "platform": "ashby", "token": "decagon", "startup": True},
+    {"name": "Cursor (Anysphere)", "platform": "ashby", "token": "cursor", "startup": True},
+    {"name": "Modal", "platform": "ashby", "token": "modal", "startup": True},
+    {"name": "Baseten", "platform": "ashby", "token": "baseten", "startup": True},
+    {"name": "Notion", "platform": "ashby", "token": "notion", "startup": True},
+    {"name": "Ramp", "platform": "ashby", "token": "ramp", "startup": True},
+    {"name": "Linear", "platform": "ashby", "token": "linear", "startup": True},
+    {"name": "Replit", "platform": "ashby", "token": "replit", "startup": True},
+    {"name": "PostHog", "platform": "ashby", "token": "posthog", "startup": True},
+    {"name": "Runway", "platform": "ashby", "token": "runway", "startup": True},
+    {"name": "Zapier", "platform": "ashby", "token": "zapier", "startup": True},
+    {"name": "Airbyte", "platform": "ashby", "token": "airbyte", "startup": True},
+    {"name": "Temporal", "platform": "ashby", "token": "temporal", "startup": True},
+    {"name": "Substack", "platform": "ashby", "token": "substack", "startup": True},
+    {"name": "Together AI", "platform": "greenhouse", "token": "togetherai", "startup": True},
+    {"name": "Fireworks AI", "platform": "greenhouse", "token": "fireworksai", "startup": True},
+    {"name": "Mercury", "platform": "greenhouse", "token": "mercury", "startup": True},
+    {"name": "Vercel", "platform": "greenhouse", "token": "vercel", "startup": True},
+    {"name": "Webflow", "platform": "greenhouse", "token": "webflow", "startup": True},
+    {"name": "Airtable", "platform": "greenhouse", "token": "airtable", "startup": True},
+    {"name": "GitLab", "platform": "greenhouse", "token": "gitlab", "startup": False},
+    {"name": "Cockroach Labs", "platform": "greenhouse", "token": "cockroachlabs", "startup": True},
+    {"name": "Scale AI", "platform": "greenhouse", "token": "scaleai", "startup": True},
+    {"name": "Turing", "platform": "greenhouse", "token": "turing", "startup": True},
+    {"name": "Flexport", "platform": "greenhouse", "token": "flexport", "startup": True},
+    {"name": "Whoop", "platform": "lever", "token": "whoop", "startup": True},
+    {"name": "Confluent", "platform": "ashby", "token": "confluent", "startup": False},
+    {"name": "Plaid", "platform": "ashby", "token": "plaid", "startup": True},
+    {"name": "Sift", "platform": "ashby", "token": "sift", "startup": True},
 
     # ── Larger tech (still worth a look — via their public ATS) ──
-    {"name": "Stripe", "platform": "greenhouse", "token": "stripe"},
-    {"name": "Databricks", "platform": "greenhouse", "token": "databricks"},
-    {"name": "Figma", "platform": "greenhouse", "token": "figma"},
-    {"name": "Coinbase", "platform": "greenhouse", "token": "coinbase"},
-    {"name": "MongoDB", "platform": "greenhouse", "token": "mongodb"},
-    {"name": "Instacart", "platform": "greenhouse", "token": "instacart"},
-    {"name": "Reddit", "platform": "greenhouse", "token": "reddit"},
-    {"name": "Affirm", "platform": "greenhouse", "token": "affirm"},
-    {"name": "Asana", "platform": "greenhouse", "token": "asana"},
-    {"name": "Robinhood", "platform": "greenhouse", "token": "robinhood"},
-    {"name": "Discord", "platform": "greenhouse", "token": "discord"},
-    {"name": "Samsara", "platform": "greenhouse", "token": "samsara"},
-    {"name": "TripAdvisor", "platform": "greenhouse", "token": "tripadvisor"},
+    {"name": "Stripe", "platform": "greenhouse", "token": "stripe", "startup": True},
+    {"name": "Databricks", "platform": "greenhouse", "token": "databricks", "startup": True},
+    {"name": "Figma", "platform": "greenhouse", "token": "figma", "startup": True},
+    {"name": "Coinbase", "platform": "greenhouse", "token": "coinbase", "startup": False},
+    {"name": "MongoDB", "platform": "greenhouse", "token": "mongodb", "startup": False},
+    {"name": "Instacart", "platform": "greenhouse", "token": "instacart", "startup": False},
+    {"name": "Reddit", "platform": "greenhouse", "token": "reddit", "startup": False},
+    {"name": "Affirm", "platform": "greenhouse", "token": "affirm", "startup": False},
+    {"name": "Asana", "platform": "greenhouse", "token": "asana", "startup": False},
+    {"name": "Robinhood", "platform": "greenhouse", "token": "robinhood", "startup": False},
+    {"name": "Discord", "platform": "greenhouse", "token": "discord", "startup": True},
+    {"name": "Samsara", "platform": "greenhouse", "token": "samsara", "startup": False},
+    {"name": "TripAdvisor", "platform": "greenhouse", "token": "tripadvisor", "startup": False},
+
+    # ── Added to increase daily new-posting volume ──
+    {"name": "Palantir", "platform": "lever", "token": "palantir", "startup": False},
+    {"name": "Snowflake", "platform": "ashby", "token": "snowflake", "startup": False},
+    {"name": "Cloudflare", "platform": "greenhouse", "token": "cloudflare", "startup": False},
+    {"name": "Twilio", "platform": "greenhouse", "token": "twilio", "startup": False},
+    {"name": "Duolingo", "platform": "greenhouse", "token": "duolingo", "startup": False},
+    {"name": "Dropbox", "platform": "greenhouse", "token": "dropbox", "startup": False},
+    {"name": "Pinterest", "platform": "greenhouse", "token": "pinterest", "startup": False},
+    {"name": "Roblox", "platform": "greenhouse", "token": "roblox", "startup": False},
+    {"name": "Okta", "platform": "greenhouse", "token": "okta", "startup": False},
+    {"name": "Datadog", "platform": "greenhouse", "token": "datadog", "startup": False},
+    {"name": "Elastic", "platform": "greenhouse", "token": "elastic", "startup": False},
+    {"name": "PagerDuty", "platform": "greenhouse", "token": "pagerduty", "startup": False},
+    {"name": "Amplitude", "platform": "greenhouse", "token": "amplitude", "startup": False},
+    {"name": "Mixpanel", "platform": "greenhouse", "token": "mixpanel", "startup": True},
+    {"name": "Braze", "platform": "greenhouse", "token": "braze", "startup": False},
+    {"name": "Klaviyo", "platform": "greenhouse", "token": "klaviyo", "startup": False},
+    {"name": "Miro", "platform": "ashby", "token": "miro", "startup": True},
+    {"name": "Calendly", "platform": "greenhouse", "token": "calendly", "startup": True},
+    {"name": "Chime", "platform": "greenhouse", "token": "chime", "startup": True},
+    {"name": "SoFi", "platform": "greenhouse", "token": "sofi", "startup": False},
+    {"name": "Wealthfront", "platform": "lever", "token": "wealthfront", "startup": True},
+    {"name": "Betterment", "platform": "greenhouse", "token": "betterment", "startup": True},
+    {"name": "Carta", "platform": "greenhouse", "token": "carta", "startup": True},
+    {"name": "Vanta", "platform": "ashby", "token": "vanta", "startup": True},
+    {"name": "Drata", "platform": "ashby", "token": "drata", "startup": True},
+    {"name": "1Password", "platform": "ashby", "token": "1password", "startup": True},
+    {"name": "LaunchDarkly", "platform": "greenhouse", "token": "launchdarkly", "startup": True},
+    {"name": "Contentful", "platform": "greenhouse", "token": "contentful", "startup": True},
+    {"name": "Sanity", "platform": "ashby", "token": "sanity", "startup": True},
+    {"name": "Supabase", "platform": "ashby", "token": "supabase", "startup": True},
+    {"name": "PlanetScale", "platform": "greenhouse", "token": "planetscale", "startup": True},
+    {"name": "Neon", "platform": "lever", "token": "neon", "startup": True},
+    {"name": "WorkOS", "platform": "ashby", "token": "workos", "startup": True},
+    {"name": "Persona", "platform": "ashby", "token": "persona", "startup": True},
+    {"name": "Merge", "platform": "ashby", "token": "merge", "startup": True},
+    {"name": "Metronome", "platform": "greenhouse", "token": "metronome", "startup": True},
+    {"name": "Column", "platform": "ashby", "token": "column", "startup": True},
+    {"name": "Modern Treasury", "platform": "ashby", "token": "moderntreasury", "startup": True},
+    {"name": "Lithic", "platform": "greenhouse", "token": "lithic", "startup": True},
+    {"name": "Unit", "platform": "ashby", "token": "unit", "startup": True},
+    {"name": "Alloy", "platform": "greenhouse", "token": "alloy", "startup": True},
+    {"name": "Socure", "platform": "ashby", "token": "socure", "startup": True},
+    {"name": "Fireblocks", "platform": "greenhouse", "token": "fireblocks", "startup": True},
+    {"name": "Gemini", "platform": "greenhouse", "token": "gemini", "startup": True},
+    {"name": "Anchorage", "platform": "lever", "token": "anchorage", "startup": True},
+    {"name": "Wealthsimple", "platform": "ashby", "token": "wealthsimple", "startup": True},
+    {"name": "Upstart", "platform": "greenhouse", "token": "upstart", "startup": False},
+    {"name": "Block", "platform": "greenhouse", "token": "block", "startup": False},
+    {"name": "Faire", "platform": "greenhouse", "token": "faire", "startup": True},
+    {"name": "StockX", "platform": "greenhouse", "token": "stockx", "startup": True},
+    {"name": "FanDuel", "platform": "greenhouse", "token": "fanduel", "startup": False},
+    {"name": "PrizePicks", "platform": "greenhouse", "token": "prizepicks", "startup": True},
+    {"name": "Sleeper", "platform": "ashby", "token": "sleeper", "startup": True},
+    {"name": "Twitch", "platform": "greenhouse", "token": "twitch", "startup": False},
+    {"name": "Cohere", "platform": "ashby", "token": "cohere", "startup": True},
+    {"name": "LangChain", "platform": "ashby", "token": "langchain", "startup": True},
+    {"name": "Pinecone", "platform": "ashby", "token": "pinecone", "startup": True},
+    {"name": "Chroma", "platform": "ashby", "token": "trychroma", "startup": True},
+    {"name": "IMC Trading", "platform": "greenhouse", "token": "imc", "startup": False},
+    {"name": "Jane Street", "platform": "greenhouse", "token": "janestreet", "startup": False},
+    {"name": "Squarespace", "platform": "greenhouse", "token": "squarespace", "startup": False},
+    {"name": "Toast", "platform": "greenhouse", "token": "toast", "startup": False},
+    {"name": "Postman", "platform": "greenhouse", "token": "postman", "startup": True},
+    {"name": "Docker", "platform": "ashby", "token": "docker", "startup": True},
+    {"name": "Render", "platform": "ashby", "token": "render", "startup": True},
+    {"name": "Railway", "platform": "ashby", "token": "railway", "startup": True},
+    {"name": "Warp", "platform": "greenhouse", "token": "warp", "startup": True},
 ]
 
 # Only postings whose title looks like an internship / co-op / new-grad /
@@ -209,6 +280,7 @@ def fetch_greenhouse(company: dict) -> list[dict]:
             "id": f"gh:{token}:{j['id']}",
             "title": j.get("title", ""),
             "companyName": company["name"],
+            "isStartup": company["startup"],
             "location": location,
             "descriptionText": strip_html(j.get("content", "")),
             "link": j.get("absolute_url", ""),
@@ -229,6 +301,7 @@ def fetch_lever(company: dict) -> list[dict]:
             "id": f"lever:{token}:{j['id']}",
             "title": j.get("text", ""),
             "companyName": company["name"],
+            "isStartup": company["startup"],
             "location": cats.get("location", ""),
             "descriptionText": strip_html(j.get("descriptionPlain") or j.get("description", "")),
             "link": j.get("hostedUrl", ""),
@@ -253,6 +326,7 @@ def fetch_ashby(company: dict) -> list[dict]:
             "id": f"ashby:{token}:{j['id']}",
             "title": j.get("title", ""),
             "companyName": company["name"],
+            "isStartup": company["startup"],
             "location": location,
             "descriptionText": strip_html(j.get("descriptionHtml") or ""),
             "link": j.get("jobUrl", ""),
@@ -393,12 +467,16 @@ def chance_color(score: int) -> str:
 
 
 # ── Deduplicate against existing sheet ───────────────────────────────────
+MAIN_SHEET_NAME = "Internship Matches"
+STARTUP_SHEET_NAME = "Startups"
+
+
 def load_existing_ids(path: str) -> set:
     if not os.path.exists(path):
         return set()
     try:
         wb = openpyxl.load_workbook(path)
-        ws = wb.active
+        ws = wb[MAIN_SHEET_NAME] if MAIN_SHEET_NAME in wb.sheetnames else wb.active
         return {str(row[0]) for row in ws.iter_rows(min_row=2, values_only=True) if row[0]}
     except Exception:
         return set()
@@ -424,36 +502,45 @@ def thin_border():
 
 
 def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
-    """Returns the (job, score) pairs actually written — used to build the
-    Discord notification so it only reports what's genuinely new today."""
+    """Returns the (job, score) pairs actually written to the main sheet —
+    used to build the Discord notification so it only reports what's
+    genuinely new today. The Startups sheet is a same-day mirror subset."""
     existing_ids = load_existing_ids(path)
     added = []
 
     if os.path.exists(path):
         wb = openpyxl.load_workbook(path)
-        ws = wb.active
-        for job in jobs_scored:
-            if job["id"] in existing_ids:
-                continue
-            score = _append_row(ws, job)
-            if score is not None:
-                added.append((job, score))
-        print(f"Added {len(added)} new internship postings to existing sheet.")
+        ws_main = wb[MAIN_SHEET_NAME] if MAIN_SHEET_NAME in wb.sheetnames else wb.active
+        ws_main.title = MAIN_SHEET_NAME
+        ws_startup = wb[STARTUP_SHEET_NAME] if STARTUP_SHEET_NAME in wb.sheetnames else None
+        if ws_startup is None:
+            ws_startup = wb.create_sheet(STARTUP_SHEET_NAME)
+            _write_header(ws_startup)
     else:
         wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Internship Matches"
-        _write_header(ws)
-        for job in jobs_scored:
-            score = _append_row(ws, job)
-            if score is not None:
-                added.append((job, score))
-        print(f"Created new sheet with {len(added)} internship postings.")
+        ws_main = wb.active
+        ws_main.title = MAIN_SHEET_NAME
+        _write_header(ws_main)
+        ws_startup = wb.create_sheet(STARTUP_SHEET_NAME)
+        _write_header(ws_startup)
 
-    ws.freeze_panes = "A2"
-    for i, width in enumerate(COL_WIDTHS, 1):
-        ws.column_dimensions[get_column_letter(i)].width = width
-    ws.auto_filter.ref = ws.dimensions
+    for job in jobs_scored:
+        if job["id"] in existing_ids:
+            continue
+        score = _append_row(ws_main, job)
+        if score is not None:
+            added.append((job, score))
+            if job.get("isStartup"):
+                _append_row(ws_startup, job)
+
+    print(f"Added {len(added)} new internship postings "
+          f"({sum(1 for j, _ in added if j.get('isStartup'))} startup) to the sheet.")
+
+    for ws in (ws_main, ws_startup):
+        ws.freeze_panes = "A2"
+        for i, width in enumerate(COL_WIDTHS, 1):
+            ws.column_dimensions[get_column_letter(i)].width = width
+        ws.auto_filter.ref = ws.dimensions
 
     wb.save(path)
     print(f"Saved to {path}")
