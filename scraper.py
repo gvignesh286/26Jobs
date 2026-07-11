@@ -11,6 +11,7 @@ import re
 import json
 import time
 from datetime import datetime, timezone
+from urllib.parse import quote
 import requests
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -46,144 +47,191 @@ PROFILE = {
     ],
 }
 
+CONTACT = {
+    "name": "Giri Vignesh",
+    "school": "Washington State University",
+    "grad": "May 2027",
+    "email": "girivignesh5@gmail.com",
+    "phone": "(425) 362-2938",
+    "github": "github.com/gvignesh286",
+}
+
+# One-line project highlights, keyed by which skill category they best sell.
+# _pick_highlight() matches these against a job's matched skills so the
+# outreach draft references the most relevant project, not a generic one.
+HIGHLIGHTS = {
+    "ml": {
+        "keywords": ["tensorflow", "pytorch", "keras", "nlp", "llm", "rag",
+                      "langchain", "embeddings", "machine learning", "deep learning",
+                      "artificial intelligence"],
+        "short": "I recently built APEX, an ML-driven trading signal system with a self-retraining model",
+        "email": "Most recently I built APEX, a full-stack system that combines a technical-analysis "
+                  "signal engine with a RandomForest model that retrains itself on live trading outcomes "
+                  "— deployed end-to-end on AWS.",
+    },
+    "web": {
+        "keywords": ["react", "next.js", "nextjs", "flask", "node", "node.js", "express",
+                      "mongodb", "full stack", "full-stack", "backend", "frontend", "rest", "restful"],
+        "short": "I've shipped a few full-stack apps (Flask/React, deployed on AWS) including an AI travel planner",
+        "email": "I've shipped several full-stack projects — including TravelBuddy, an AI-powered travel "
+                  "planner with a Flask backend and React frontend deployed on AWS, and a hackathon project "
+                  "integrating the Anthropic Claude API built in 24 hours.",
+    },
+    "data": {
+        "keywords": ["data analysis", "data analyst", "data analytics", "business analyst",
+                      "pandas", "data visualization", "statistics", "sql"],
+        "short": "I've built a couple of data-heavy projects, including an automated stock signal analyzer",
+        "email": "I've built a couple of data-focused projects — an automated stock analysis tool applying "
+                  "technical indicators to live market data, and an interactive trail-mapping app processing "
+                  "200+ real-world datasets with Pandas.",
+    },
+    "default": {
+        "keywords": [],
+        "short": "I'm a CS student who's shipped several full-stack and ML projects, including one at a hackathon",
+        "email": "I've spent the last couple years building full-stack and ML projects — from an AI travel "
+                  "planner to a hackathon project (top result at WSU's CrimsonCode, 250+ participants) "
+                  "integrating the Anthropic Claude API.",
+    },
+}
+
 # Only these ATS platforms are queried — all are free, public, no-auth JSON
 # APIs, chosen specifically to replace the unreliable Apify/LinkedIn scrape.
 # "startup" tags which companies land on the separate "Startups" sheet tab —
 # True for private/venture-funded companies, False for public/large-cap ones.
 COMPANIES = [
     # ── Seattle-area ──
-    {"name": "Smartsheet", "platform": "greenhouse", "token": "smartsheet", "startup": False},
-    {"name": "Amperity", "platform": "greenhouse", "token": "amperity", "startup": True},
-    {"name": "Textio", "platform": "greenhouse", "token": "textio", "startup": True},
-    {"name": "Karat", "platform": "greenhouse", "token": "karat", "startup": True},
-    {"name": "Xealth", "platform": "greenhouse", "token": "xealth", "startup": True},
-    {"name": "Bungie", "platform": "greenhouse", "token": "bungie", "startup": False},
-    {"name": "Rover", "platform": "lever", "token": "rover", "startup": False},
-    {"name": "Outreach", "platform": "lever", "token": "outreach", "startup": True},
-    {"name": "Highspot", "platform": "lever", "token": "highspot", "startup": True},
-    {"name": "Qumulo", "platform": "ashby", "token": "qumulo", "startup": True},
-    {"name": "PayScale", "platform": "ashby", "token": "payscale", "startup": True},
-    {"name": "Adaptive Biotechnologies", "platform": "ashby", "token": "adaptive", "startup": False},
+    {"name": "Smartsheet", "platform": "greenhouse", "token": "smartsheet", "startup": False, "website": "https://www.smartsheet.com"},
+    {"name": "Amperity", "platform": "greenhouse", "token": "amperity", "startup": True, "website": "https://amperity.com"},
+    {"name": "Textio", "platform": "greenhouse", "token": "textio", "startup": True, "website": "https://textio.com"},
+    {"name": "Karat", "platform": "greenhouse", "token": "karat", "startup": True, "website": "https://karat.com"},
+    {"name": "Xealth", "platform": "greenhouse", "token": "xealth", "startup": True, "website": "https://xealth.com"},
+    {"name": "Bungie", "platform": "greenhouse", "token": "bungie", "startup": False, "website": "https://www.bungie.net"},
+    {"name": "Rover", "platform": "lever", "token": "rover", "startup": False, "website": "https://www.rover.com"},
+    {"name": "Outreach", "platform": "lever", "token": "outreach", "startup": True, "website": "https://www.outreach.io"},
+    {"name": "Highspot", "platform": "lever", "token": "highspot", "startup": True, "website": "https://www.highspot.com"},
+    {"name": "Qumulo", "platform": "ashby", "token": "qumulo", "startup": True, "website": "https://qumulo.com"},
+    {"name": "PayScale", "platform": "ashby", "token": "payscale", "startup": True, "website": "https://www.payscale.com"},
+    {"name": "Adaptive Biotechnologies", "platform": "ashby", "token": "adaptive", "startup": False, "website": "https://www.adaptivebiotech.com"},
 
     # ── Remote-friendly / AI startups ──
-    {"name": "Anthropic", "platform": "greenhouse", "token": "anthropic", "startup": True},
-    {"name": "OpenAI", "platform": "ashby", "token": "openai", "startup": True},
-    {"name": "Perplexity", "platform": "ashby", "token": "perplexity", "startup": True},
-    {"name": "Harvey", "platform": "ashby", "token": "harvey", "startup": True},
-    {"name": "Sierra", "platform": "ashby", "token": "sierra", "startup": True},
-    {"name": "Decagon", "platform": "ashby", "token": "decagon", "startup": True},
-    {"name": "Cursor (Anysphere)", "platform": "ashby", "token": "cursor", "startup": True},
-    {"name": "Modal", "platform": "ashby", "token": "modal", "startup": True},
-    {"name": "Baseten", "platform": "ashby", "token": "baseten", "startup": True},
-    {"name": "Notion", "platform": "ashby", "token": "notion", "startup": True},
-    {"name": "Ramp", "platform": "ashby", "token": "ramp", "startup": True},
-    {"name": "Linear", "platform": "ashby", "token": "linear", "startup": True},
-    {"name": "Replit", "platform": "ashby", "token": "replit", "startup": True},
-    {"name": "PostHog", "platform": "ashby", "token": "posthog", "startup": True},
-    {"name": "Runway", "platform": "ashby", "token": "runway", "startup": True},
-    {"name": "Zapier", "platform": "ashby", "token": "zapier", "startup": True},
-    {"name": "Airbyte", "platform": "ashby", "token": "airbyte", "startup": True},
-    {"name": "Temporal", "platform": "ashby", "token": "temporal", "startup": True},
-    {"name": "Substack", "platform": "ashby", "token": "substack", "startup": True},
-    {"name": "Together AI", "platform": "greenhouse", "token": "togetherai", "startup": True},
-    {"name": "Fireworks AI", "platform": "greenhouse", "token": "fireworksai", "startup": True},
-    {"name": "Mercury", "platform": "greenhouse", "token": "mercury", "startup": True},
-    {"name": "Vercel", "platform": "greenhouse", "token": "vercel", "startup": True},
-    {"name": "Webflow", "platform": "greenhouse", "token": "webflow", "startup": True},
-    {"name": "Airtable", "platform": "greenhouse", "token": "airtable", "startup": True},
-    {"name": "GitLab", "platform": "greenhouse", "token": "gitlab", "startup": False},
-    {"name": "Cockroach Labs", "platform": "greenhouse", "token": "cockroachlabs", "startup": True},
-    {"name": "Scale AI", "platform": "greenhouse", "token": "scaleai", "startup": True},
-    {"name": "Turing", "platform": "greenhouse", "token": "turing", "startup": True},
-    {"name": "Flexport", "platform": "greenhouse", "token": "flexport", "startup": True},
-    {"name": "Whoop", "platform": "lever", "token": "whoop", "startup": True},
-    {"name": "Confluent", "platform": "ashby", "token": "confluent", "startup": False},
-    {"name": "Plaid", "platform": "ashby", "token": "plaid", "startup": True},
-    {"name": "Sift", "platform": "ashby", "token": "sift", "startup": True},
+    {"name": "Anthropic", "platform": "greenhouse", "token": "anthropic", "startup": True, "website": "https://www.anthropic.com"},
+    {"name": "OpenAI", "platform": "ashby", "token": "openai", "startup": True, "website": "https://openai.com"},
+    {"name": "Perplexity", "platform": "ashby", "token": "perplexity", "startup": True, "website": "https://www.perplexity.ai"},
+    {"name": "Harvey", "platform": "ashby", "token": "harvey", "startup": True, "website": "https://www.harvey.ai"},
+    {"name": "Sierra", "platform": "ashby", "token": "sierra", "startup": True, "website": "https://sierra.ai"},
+    {"name": "Decagon", "platform": "ashby", "token": "decagon", "startup": True, "website": "https://decagon.ai"},
+    {"name": "Cursor (Anysphere)", "platform": "ashby", "token": "cursor", "startup": True, "website": "https://www.cursor.com"},
+    {"name": "Modal", "platform": "ashby", "token": "modal", "startup": True, "website": "https://modal.com"},
+    {"name": "Baseten", "platform": "ashby", "token": "baseten", "startup": True, "website": "https://www.baseten.co"},
+    {"name": "Notion", "platform": "ashby", "token": "notion", "startup": True, "website": "https://www.notion.so"},
+    {"name": "Ramp", "platform": "ashby", "token": "ramp", "startup": True, "website": "https://ramp.com"},
+    {"name": "Linear", "platform": "ashby", "token": "linear", "startup": True, "website": "https://linear.app"},
+    {"name": "Replit", "platform": "ashby", "token": "replit", "startup": True, "website": "https://replit.com"},
+    {"name": "PostHog", "platform": "ashby", "token": "posthog", "startup": True, "website": "https://posthog.com"},
+    {"name": "Runway", "platform": "ashby", "token": "runway", "startup": True, "website": "https://runwayml.com"},
+    {"name": "Zapier", "platform": "ashby", "token": "zapier", "startup": True, "website": "https://zapier.com"},
+    {"name": "Airbyte", "platform": "ashby", "token": "airbyte", "startup": True, "website": "https://airbyte.com"},
+    {"name": "Temporal", "platform": "ashby", "token": "temporal", "startup": True, "website": "https://temporal.io"},
+    {"name": "Substack", "platform": "ashby", "token": "substack", "startup": True, "website": "https://substack.com"},
+    {"name": "Together AI", "platform": "greenhouse", "token": "togetherai", "startup": True, "website": "https://www.together.ai"},
+    {"name": "Fireworks AI", "platform": "greenhouse", "token": "fireworksai", "startup": True, "website": "https://fireworks.ai"},
+    {"name": "Mercury", "platform": "greenhouse", "token": "mercury", "startup": True, "website": "https://mercury.com"},
+    {"name": "Vercel", "platform": "greenhouse", "token": "vercel", "startup": True, "website": "https://vercel.com"},
+    {"name": "Webflow", "platform": "greenhouse", "token": "webflow", "startup": True, "website": "https://webflow.com"},
+    {"name": "Airtable", "platform": "greenhouse", "token": "airtable", "startup": True, "website": "https://www.airtable.com"},
+    {"name": "GitLab", "platform": "greenhouse", "token": "gitlab", "startup": False, "website": "https://about.gitlab.com"},
+    {"name": "Cockroach Labs", "platform": "greenhouse", "token": "cockroachlabs", "startup": True, "website": "https://www.cockroachlabs.com"},
+    {"name": "Scale AI", "platform": "greenhouse", "token": "scaleai", "startup": True, "website": "https://scale.com"},
+    {"name": "Turing", "platform": "greenhouse", "token": "turing", "startup": True, "website": "https://www.turing.com"},
+    {"name": "Flexport", "platform": "greenhouse", "token": "flexport", "startup": True, "website": "https://www.flexport.com"},
+    {"name": "Whoop", "platform": "lever", "token": "whoop", "startup": True, "website": "https://www.whoop.com"},
+    {"name": "Confluent", "platform": "ashby", "token": "confluent", "startup": False, "website": "https://www.confluent.io"},
+    {"name": "Plaid", "platform": "ashby", "token": "plaid", "startup": True, "website": "https://plaid.com"},
+    {"name": "Sift", "platform": "ashby", "token": "sift", "startup": True, "website": "https://sift.com"},
 
     # ── Larger tech (still worth a look — via their public ATS) ──
-    {"name": "Stripe", "platform": "greenhouse", "token": "stripe", "startup": True},
-    {"name": "Databricks", "platform": "greenhouse", "token": "databricks", "startup": True},
-    {"name": "Figma", "platform": "greenhouse", "token": "figma", "startup": True},
-    {"name": "Coinbase", "platform": "greenhouse", "token": "coinbase", "startup": False},
-    {"name": "MongoDB", "platform": "greenhouse", "token": "mongodb", "startup": False},
-    {"name": "Instacart", "platform": "greenhouse", "token": "instacart", "startup": False},
-    {"name": "Reddit", "platform": "greenhouse", "token": "reddit", "startup": False},
-    {"name": "Affirm", "platform": "greenhouse", "token": "affirm", "startup": False},
-    {"name": "Asana", "platform": "greenhouse", "token": "asana", "startup": False},
-    {"name": "Robinhood", "platform": "greenhouse", "token": "robinhood", "startup": False},
-    {"name": "Discord", "platform": "greenhouse", "token": "discord", "startup": True},
-    {"name": "Samsara", "platform": "greenhouse", "token": "samsara", "startup": False},
-    {"name": "TripAdvisor", "platform": "greenhouse", "token": "tripadvisor", "startup": False},
+    {"name": "Stripe", "platform": "greenhouse", "token": "stripe", "startup": True, "website": "https://stripe.com"},
+    {"name": "Databricks", "platform": "greenhouse", "token": "databricks", "startup": True, "website": "https://www.databricks.com"},
+    {"name": "Figma", "platform": "greenhouse", "token": "figma", "startup": True, "website": "https://www.figma.com"},
+    {"name": "Coinbase", "platform": "greenhouse", "token": "coinbase", "startup": False, "website": "https://www.coinbase.com"},
+    {"name": "MongoDB", "platform": "greenhouse", "token": "mongodb", "startup": False, "website": "https://www.mongodb.com"},
+    {"name": "Instacart", "platform": "greenhouse", "token": "instacart", "startup": False, "website": "https://www.instacart.com"},
+    {"name": "Reddit", "platform": "greenhouse", "token": "reddit", "startup": False, "website": "https://www.redditinc.com"},
+    {"name": "Affirm", "platform": "greenhouse", "token": "affirm", "startup": False, "website": "https://www.affirm.com"},
+    {"name": "Asana", "platform": "greenhouse", "token": "asana", "startup": False, "website": "https://asana.com"},
+    {"name": "Robinhood", "platform": "greenhouse", "token": "robinhood", "startup": False, "website": "https://robinhood.com"},
+    {"name": "Discord", "platform": "greenhouse", "token": "discord", "startup": True, "website": "https://discord.com"},
+    {"name": "Samsara", "platform": "greenhouse", "token": "samsara", "startup": False, "website": "https://www.samsara.com"},
+    {"name": "TripAdvisor", "platform": "greenhouse", "token": "tripadvisor", "startup": False, "website": "https://www.tripadvisor.com"},
 
     # ── Added to increase daily new-posting volume ──
-    {"name": "Palantir", "platform": "lever", "token": "palantir", "startup": False},
-    {"name": "Snowflake", "platform": "ashby", "token": "snowflake", "startup": False},
-    {"name": "Cloudflare", "platform": "greenhouse", "token": "cloudflare", "startup": False},
-    {"name": "Twilio", "platform": "greenhouse", "token": "twilio", "startup": False},
-    {"name": "Duolingo", "platform": "greenhouse", "token": "duolingo", "startup": False},
-    {"name": "Dropbox", "platform": "greenhouse", "token": "dropbox", "startup": False},
-    {"name": "Pinterest", "platform": "greenhouse", "token": "pinterest", "startup": False},
-    {"name": "Roblox", "platform": "greenhouse", "token": "roblox", "startup": False},
-    {"name": "Okta", "platform": "greenhouse", "token": "okta", "startup": False},
-    {"name": "Datadog", "platform": "greenhouse", "token": "datadog", "startup": False},
-    {"name": "Elastic", "platform": "greenhouse", "token": "elastic", "startup": False},
-    {"name": "PagerDuty", "platform": "greenhouse", "token": "pagerduty", "startup": False},
-    {"name": "Amplitude", "platform": "greenhouse", "token": "amplitude", "startup": False},
-    {"name": "Mixpanel", "platform": "greenhouse", "token": "mixpanel", "startup": True},
-    {"name": "Braze", "platform": "greenhouse", "token": "braze", "startup": False},
-    {"name": "Klaviyo", "platform": "greenhouse", "token": "klaviyo", "startup": False},
-    {"name": "Miro", "platform": "ashby", "token": "miro", "startup": True},
-    {"name": "Calendly", "platform": "greenhouse", "token": "calendly", "startup": True},
-    {"name": "Chime", "platform": "greenhouse", "token": "chime", "startup": True},
-    {"name": "SoFi", "platform": "greenhouse", "token": "sofi", "startup": False},
-    {"name": "Wealthfront", "platform": "lever", "token": "wealthfront", "startup": True},
-    {"name": "Betterment", "platform": "greenhouse", "token": "betterment", "startup": True},
-    {"name": "Carta", "platform": "greenhouse", "token": "carta", "startup": True},
-    {"name": "Vanta", "platform": "ashby", "token": "vanta", "startup": True},
-    {"name": "Drata", "platform": "ashby", "token": "drata", "startup": True},
-    {"name": "1Password", "platform": "ashby", "token": "1password", "startup": True},
-    {"name": "LaunchDarkly", "platform": "greenhouse", "token": "launchdarkly", "startup": True},
-    {"name": "Contentful", "platform": "greenhouse", "token": "contentful", "startup": True},
-    {"name": "Sanity", "platform": "ashby", "token": "sanity", "startup": True},
-    {"name": "Supabase", "platform": "ashby", "token": "supabase", "startup": True},
-    {"name": "PlanetScale", "platform": "greenhouse", "token": "planetscale", "startup": True},
-    {"name": "Neon", "platform": "lever", "token": "neon", "startup": True},
-    {"name": "WorkOS", "platform": "ashby", "token": "workos", "startup": True},
-    {"name": "Persona", "platform": "ashby", "token": "persona", "startup": True},
-    {"name": "Merge", "platform": "ashby", "token": "merge", "startup": True},
-    {"name": "Metronome", "platform": "greenhouse", "token": "metronome", "startup": True},
-    {"name": "Column", "platform": "ashby", "token": "column", "startup": True},
-    {"name": "Modern Treasury", "platform": "ashby", "token": "moderntreasury", "startup": True},
-    {"name": "Lithic", "platform": "greenhouse", "token": "lithic", "startup": True},
-    {"name": "Unit", "platform": "ashby", "token": "unit", "startup": True},
-    {"name": "Alloy", "platform": "greenhouse", "token": "alloy", "startup": True},
-    {"name": "Socure", "platform": "ashby", "token": "socure", "startup": True},
-    {"name": "Fireblocks", "platform": "greenhouse", "token": "fireblocks", "startup": True},
-    {"name": "Gemini", "platform": "greenhouse", "token": "gemini", "startup": True},
-    {"name": "Anchorage", "platform": "lever", "token": "anchorage", "startup": True},
-    {"name": "Wealthsimple", "platform": "ashby", "token": "wealthsimple", "startup": True},
-    {"name": "Upstart", "platform": "greenhouse", "token": "upstart", "startup": False},
-    {"name": "Block", "platform": "greenhouse", "token": "block", "startup": False},
-    {"name": "Faire", "platform": "greenhouse", "token": "faire", "startup": True},
-    {"name": "StockX", "platform": "greenhouse", "token": "stockx", "startup": True},
-    {"name": "FanDuel", "platform": "greenhouse", "token": "fanduel", "startup": False},
-    {"name": "PrizePicks", "platform": "greenhouse", "token": "prizepicks", "startup": True},
-    {"name": "Sleeper", "platform": "ashby", "token": "sleeper", "startup": True},
-    {"name": "Twitch", "platform": "greenhouse", "token": "twitch", "startup": False},
-    {"name": "Cohere", "platform": "ashby", "token": "cohere", "startup": True},
-    {"name": "LangChain", "platform": "ashby", "token": "langchain", "startup": True},
-    {"name": "Pinecone", "platform": "ashby", "token": "pinecone", "startup": True},
-    {"name": "Chroma", "platform": "ashby", "token": "trychroma", "startup": True},
-    {"name": "IMC Trading", "platform": "greenhouse", "token": "imc", "startup": False},
-    {"name": "Jane Street", "platform": "greenhouse", "token": "janestreet", "startup": False},
-    {"name": "Squarespace", "platform": "greenhouse", "token": "squarespace", "startup": False},
-    {"name": "Toast", "platform": "greenhouse", "token": "toast", "startup": False},
-    {"name": "Postman", "platform": "greenhouse", "token": "postman", "startup": True},
-    {"name": "Docker", "platform": "ashby", "token": "docker", "startup": True},
-    {"name": "Render", "platform": "ashby", "token": "render", "startup": True},
-    {"name": "Railway", "platform": "ashby", "token": "railway", "startup": True},
-    {"name": "Warp", "platform": "greenhouse", "token": "warp", "startup": True},
+    {"name": "Palantir", "platform": "lever", "token": "palantir", "startup": False, "website": "https://www.palantir.com"},
+    {"name": "Snowflake", "platform": "ashby", "token": "snowflake", "startup": False, "website": "https://www.snowflake.com"},
+    {"name": "Cloudflare", "platform": "greenhouse", "token": "cloudflare", "startup": False, "website": "https://www.cloudflare.com"},
+    {"name": "Twilio", "platform": "greenhouse", "token": "twilio", "startup": False, "website": "https://www.twilio.com"},
+    {"name": "Duolingo", "platform": "greenhouse", "token": "duolingo", "startup": False, "website": "https://www.duolingo.com"},
+    {"name": "Dropbox", "platform": "greenhouse", "token": "dropbox", "startup": False, "website": "https://www.dropbox.com"},
+    {"name": "Pinterest", "platform": "greenhouse", "token": "pinterest", "startup": False, "website": "https://www.pinterest.com"},
+    {"name": "Roblox", "platform": "greenhouse", "token": "roblox", "startup": False, "website": "https://www.roblox.com"},
+    {"name": "Okta", "platform": "greenhouse", "token": "okta", "startup": False, "website": "https://www.okta.com"},
+    {"name": "Datadog", "platform": "greenhouse", "token": "datadog", "startup": False, "website": "https://www.datadoghq.com"},
+    {"name": "Elastic", "platform": "greenhouse", "token": "elastic", "startup": False, "website": "https://www.elastic.co"},
+    {"name": "PagerDuty", "platform": "greenhouse", "token": "pagerduty", "startup": False, "website": "https://www.pagerduty.com"},
+    {"name": "Amplitude", "platform": "greenhouse", "token": "amplitude", "startup": False, "website": "https://amplitude.com"},
+    {"name": "Mixpanel", "platform": "greenhouse", "token": "mixpanel", "startup": True, "website": "https://mixpanel.com"},
+    {"name": "Braze", "platform": "greenhouse", "token": "braze", "startup": False, "website": "https://www.braze.com"},
+    {"name": "Klaviyo", "platform": "greenhouse", "token": "klaviyo", "startup": False, "website": "https://www.klaviyo.com"},
+    {"name": "Miro", "platform": "ashby", "token": "miro", "startup": True, "website": "https://miro.com"},
+    {"name": "Calendly", "platform": "greenhouse", "token": "calendly", "startup": True, "website": "https://calendly.com"},
+    {"name": "Chime", "platform": "greenhouse", "token": "chime", "startup": True, "website": "https://www.chime.com"},
+    {"name": "SoFi", "platform": "greenhouse", "token": "sofi", "startup": False, "website": "https://www.sofi.com"},
+    {"name": "Wealthfront", "platform": "lever", "token": "wealthfront", "startup": True, "website": "https://www.wealthfront.com"},
+    {"name": "Betterment", "platform": "greenhouse", "token": "betterment", "startup": True, "website": "https://www.betterment.com"},
+    {"name": "Carta", "platform": "greenhouse", "token": "carta", "startup": True, "website": "https://carta.com"},
+    {"name": "Vanta", "platform": "ashby", "token": "vanta", "startup": True, "website": "https://www.vanta.com"},
+    {"name": "Drata", "platform": "ashby", "token": "drata", "startup": True, "website": "https://drata.com"},
+    {"name": "1Password", "platform": "ashby", "token": "1password", "startup": True, "website": "https://1password.com"},
+    {"name": "LaunchDarkly", "platform": "greenhouse", "token": "launchdarkly", "startup": True, "website": "https://launchdarkly.com"},
+    {"name": "Contentful", "platform": "greenhouse", "token": "contentful", "startup": True, "website": "https://www.contentful.com"},
+    {"name": "Sanity", "platform": "ashby", "token": "sanity", "startup": True, "website": "https://www.sanity.io"},
+    {"name": "Supabase", "platform": "ashby", "token": "supabase", "startup": True, "website": "https://supabase.com"},
+    {"name": "PlanetScale", "platform": "greenhouse", "token": "planetscale", "startup": True, "website": "https://planetscale.com"},
+    {"name": "Neon", "platform": "lever", "token": "neon", "startup": True, "website": "https://neon.tech"},
+    {"name": "WorkOS", "platform": "ashby", "token": "workos", "startup": True, "website": "https://workos.com"},
+    {"name": "Persona", "platform": "ashby", "token": "persona", "startup": True, "website": "https://withpersona.com"},
+    {"name": "Merge", "platform": "ashby", "token": "merge", "startup": True, "website": "https://www.merge.dev"},
+    {"name": "Metronome", "platform": "greenhouse", "token": "metronome", "startup": True, "website": "https://metronome.com"},
+    {"name": "Column", "platform": "ashby", "token": "column", "startup": True, "website": "https://column.com"},
+    {"name": "Modern Treasury", "platform": "ashby", "token": "moderntreasury", "startup": True, "website": "https://www.moderntreasury.com"},
+    {"name": "Lithic", "platform": "greenhouse", "token": "lithic", "startup": True, "website": "https://www.lithic.com"},
+    {"name": "Unit", "platform": "ashby", "token": "unit", "startup": True, "website": "https://www.unit.co"},
+    {"name": "Alloy", "platform": "greenhouse", "token": "alloy", "startup": True, "website": "https://www.alloy.com"},
+    {"name": "Socure", "platform": "ashby", "token": "socure", "startup": True, "website": "https://www.socure.com"},
+    {"name": "Fireblocks", "platform": "greenhouse", "token": "fireblocks", "startup": True, "website": "https://www.fireblocks.com"},
+    {"name": "Gemini", "platform": "greenhouse", "token": "gemini", "startup": True, "website": "https://www.gemini.com"},
+    {"name": "Anchorage", "platform": "lever", "token": "anchorage", "startup": True, "website": "https://www.anchorage.com"},
+    {"name": "Wealthsimple", "platform": "ashby", "token": "wealthsimple", "startup": True, "website": "https://www.wealthsimple.com"},
+    {"name": "Upstart", "platform": "greenhouse", "token": "upstart", "startup": False, "website": "https://www.upstart.com"},
+    {"name": "Block", "platform": "greenhouse", "token": "block", "startup": False, "website": "https://block.xyz"},
+    {"name": "Faire", "platform": "greenhouse", "token": "faire", "startup": True, "website": "https://www.faire.com"},
+    {"name": "StockX", "platform": "greenhouse", "token": "stockx", "startup": True, "website": "https://stockx.com"},
+    {"name": "FanDuel", "platform": "greenhouse", "token": "fanduel", "startup": False, "website": "https://www.fanduel.com"},
+    {"name": "PrizePicks", "platform": "greenhouse", "token": "prizepicks", "startup": True, "website": "https://www.prizepicks.com"},
+    {"name": "Sleeper", "platform": "ashby", "token": "sleeper", "startup": True, "website": "https://sleeper.com"},
+    {"name": "Twitch", "platform": "greenhouse", "token": "twitch", "startup": False, "website": "https://www.twitch.tv"},
+    {"name": "Cohere", "platform": "ashby", "token": "cohere", "startup": True, "website": "https://cohere.com"},
+    {"name": "LangChain", "platform": "ashby", "token": "langchain", "startup": True, "website": "https://www.langchain.com"},
+    {"name": "Pinecone", "platform": "ashby", "token": "pinecone", "startup": True, "website": "https://www.pinecone.io"},
+    {"name": "Chroma", "platform": "ashby", "token": "trychroma", "startup": True, "website": "https://www.trychroma.com"},
+    {"name": "IMC Trading", "platform": "greenhouse", "token": "imc", "startup": False, "website": "https://www.imc.com"},
+    {"name": "Jane Street", "platform": "greenhouse", "token": "janestreet", "startup": False, "website": "https://www.janestreet.com"},
+    {"name": "Squarespace", "platform": "greenhouse", "token": "squarespace", "startup": False, "website": "https://www.squarespace.com"},
+    {"name": "Toast", "platform": "greenhouse", "token": "toast", "startup": False, "website": "https://pos.toasttab.com"},
+    {"name": "Postman", "platform": "greenhouse", "token": "postman", "startup": True, "website": "https://www.postman.com"},
+    {"name": "Docker", "platform": "ashby", "token": "docker", "startup": True, "website": "https://www.docker.com"},
+    {"name": "Render", "platform": "ashby", "token": "render", "startup": True, "website": "https://render.com"},
+    {"name": "Railway", "platform": "ashby", "token": "railway", "startup": True, "website": "https://railway.com"},
+    {"name": "Warp", "platform": "greenhouse", "token": "warp", "startup": True, "website": "https://www.warp.dev"},
 ]
 
 # Only postings whose title looks like an internship / co-op / new-grad /
@@ -248,6 +296,17 @@ NON_US_LOCATION_RE = re.compile(
 
 MIN_SCORE_TO_INCLUDE = 50  # below this, a posting is dropped entirely (not just low-ranked)
 
+# The Startups sheet is further narrowed to these regions on top of the
+# startup:true tag — Seattle, SF Bay Area, Texas, Arizona, or remote.
+STARTUP_TAB_LOCATION_RE = re.compile(
+    r"(?i)\b(seattle|bellevue|redmond|kirkland|washington|pullman|"
+    r"san francisco|\bsf\b|bay area|oakland|berkeley|san jose|palo alto|"
+    r"mountain view|sunnyvale|menlo park|santa clara|fremont|"
+    r"texas|austin|dallas|houston|san antonio|fort worth|"
+    r"arizona|phoenix|tempe|scottsdale|tucson|"
+    r"remote)\b"
+)
+
 
 def skill_pattern(term: str) -> re.Pattern:
     """Word-boundary-safe match so short/symbol-heavy skills (e.g. 'rag', 'api',
@@ -281,6 +340,7 @@ def fetch_greenhouse(company: dict) -> list[dict]:
             "title": j.get("title", ""),
             "companyName": company["name"],
             "isStartup": company["startup"],
+            "website": company["website"],
             "location": location,
             "descriptionText": strip_html(j.get("content", "")),
             "link": j.get("absolute_url", ""),
@@ -302,6 +362,7 @@ def fetch_lever(company: dict) -> list[dict]:
             "title": j.get("text", ""),
             "companyName": company["name"],
             "isStartup": company["startup"],
+            "website": company["website"],
             "location": cats.get("location", ""),
             "descriptionText": strip_html(j.get("descriptionPlain") or j.get("description", "")),
             "link": j.get("hostedUrl", ""),
@@ -327,6 +388,7 @@ def fetch_ashby(company: dict) -> list[dict]:
             "title": j.get("title", ""),
             "companyName": company["name"],
             "isStartup": company["startup"],
+            "website": company["website"],
             "location": location,
             "descriptionText": strip_html(j.get("descriptionHtml") or ""),
             "link": j.get("jobUrl", ""),
@@ -482,13 +544,75 @@ def load_existing_ids(path: str) -> set:
         return set()
 
 
+# ── Outreach drafts ────────────────────────────────────────────────────────
+# Message text and manual-search links only — nothing here scrapes LinkedIn
+# or sends anything. Finding the actual person and hitting send is on Giri.
+def _matched_skills(job: dict) -> list[str]:
+    full_text = f"{(job.get('title') or '').lower()} {(job.get('descriptionText') or '').lower()}"
+    return [s for s, pat in SKILL_PATTERNS if pat.search(full_text)]
+
+
+def _pick_highlight(matched_skills: list[str]) -> dict:
+    for category in ("ml", "web", "data"):
+        if any(s in HIGHLIGHTS[category]["keywords"] for s in matched_skills):
+            return HIGHLIGHTS[category]
+    return HIGHLIGHTS["default"]
+
+
+def alumni_search_link(company: str) -> str:
+    query = f"{company} {CONTACT['school']}"
+    return f"https://www.linkedin.com/search/results/people/?keywords={quote(query)}"
+
+
+def recruiter_search_link(company: str) -> str:
+    query = f"{company} university recruiting OR campus recruiting"
+    return f"https://www.linkedin.com/search/results/people/?keywords={quote(query)}"
+
+
+def generate_linkedin_note(job: dict) -> str:
+    highlight = _pick_highlight(_matched_skills(job))
+    title, company = job.get("title", "this role"), job.get("companyName", "")
+    note = (
+        f"Hi! I'm a CS student at {CONTACT['school']} and saw {company} is hiring for "
+        f"{title}. {highlight['short']} — would love to connect and hear more about the team."
+    )
+    if len(note) > 300:
+        note = (
+            f"Hi! WSU CS student here, saw {company} is hiring for {title}. "
+            f"{highlight['short']} — would love to connect."
+        )[:300]
+    return note
+
+
+def generate_email(job: dict) -> str:
+    highlight = _pick_highlight(_matched_skills(job))
+    title, company = job.get("title", "this role"), job.get("companyName", "")
+    subject = f"Interested in the {title} role at {company}"
+    body = (
+        f"Subject: {subject}\n\n"
+        f"Hi,\n\n"
+        f"My name is {CONTACT['name']}, and I'm a Computer Science student at {CONTACT['school']} "
+        f"(graduating {CONTACT['grad']}). I came across the {title} opening at {company} and wanted "
+        f"to reach out directly — I'm genuinely interested in the role and think my background lines up well.\n\n"
+        f"{highlight['email']}\n\n"
+        f"I'd love to learn more about the team and what you're looking for — happy to send my resume "
+        f"or hop on a quick call if you're open to it.\n\n"
+        f"Thanks so much for your time,\n"
+        f"{CONTACT['name']}\n"
+        f"{CONTACT['phone']} | {CONTACT['email']} | {CONTACT['github']}"
+    )
+    return body
+
+
 # ── Excel builder ─────────────────────────────────────────────────────────
 HEADERS = [
-    "Job ID", "Date Found", "Title", "Company", "Location",
-    "Match %", "Fit", "Source", "Why It Matched", "Link", "Status", "Notes"
+    "Job ID", "Date Found", "Title", "Company", "Company Website", "Location",
+    "Match %", "Fit", "Source", "Why It Matched", "Link",
+    "WSU Alumni Search", "Recruiter Search", "LinkedIn Note Draft", "Email Draft",
+    "Status", "Notes",
 ]
 
-COL_WIDTHS = [24, 12, 34, 24, 20, 10, 13, 10, 40, 14, 14, 24]
+COL_WIDTHS = [24, 12, 34, 24, 22, 20, 10, 13, 10, 40, 14, 16, 16, 50, 50, 14, 24]
 
 NAVY = "1A3A5C"
 WHITE = "FFFFFF"
@@ -524,17 +648,20 @@ def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
         ws_startup = wb.create_sheet(STARTUP_SHEET_NAME)
         _write_header(ws_startup)
 
+    startup_count = 0
     for job in jobs_scored:
         if job["id"] in existing_ids:
             continue
         score = _append_row(ws_main, job)
         if score is not None:
             added.append((job, score))
-            if job.get("isStartup"):
+            is_target_region = STARTUP_TAB_LOCATION_RE.search((job.get("location") or "").lower())
+            if job.get("isStartup") and is_target_region:
                 _append_row(ws_startup, job)
+                startup_count += 1
 
     print(f"Added {len(added)} new internship postings "
-          f"({sum(1 for j, _ in added if j.get('isStartup'))} startup) to the sheet.")
+          f"({startup_count} startup, Seattle/SF Bay/TX/AZ/remote) to the sheet.")
 
     for ws in (ws_main, ws_startup):
         ws.freeze_panes = "A2"
@@ -565,18 +692,24 @@ def _append_row(ws, job: dict) -> int | None:
     row = ws.max_row + 1
     fill_color = LIGHT if row % 2 == 0 else WHITE
     source = job["id"].split(":")[0].capitalize()
+    company = job.get("companyName", "")
 
     values = [
         job["id"],
         datetime.today().strftime("%Y-%m-%d"),
         job.get("title", ""),
-        job.get("companyName", ""),
+        company,
+        job.get("website", ""),
         job.get("location", ""),
         score,
         chance_label(score),
         source,
         ", ".join(reasons[:4]),
         job.get("link", ""),
+        alumni_search_link(company),
+        recruiter_search_link(company),
+        generate_linkedin_note(job),
+        generate_email(job),
         "Not Applied",
         "",
     ]
@@ -584,29 +717,42 @@ def _append_row(ws, job: dict) -> int | None:
     for col, val in enumerate(values, 1):
         cell = ws.cell(row=row, column=col, value=val)
         cell.font = Font(name="Arial", size=9)
-        cell.alignment = Alignment(vertical="center", wrap_text=(col in [3, 9]))
+        cell.alignment = Alignment(vertical="center", wrap_text=(col in [3, 10, 14, 15]))
         cell.border = thin_border()
-        if col not in [6, 7]:
+        if col not in [7, 8]:
             cell.fill = PatternFill("solid", fgColor=fill_color)
 
-    pct_cell = ws.cell(row=row, column=6)
+    pct_cell = ws.cell(row=row, column=7)
     pct_cell.value = f"{score}%"
     pct_cell.font = Font(name="Arial", size=9, bold=True)
     pct_cell.fill = PatternFill("solid", fgColor=chance_color(score))
     pct_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    ch_cell = ws.cell(row=row, column=7)
+    ch_cell = ws.cell(row=row, column=8)
     ch_cell.fill = PatternFill("solid", fgColor=chance_color(score))
     ch_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    link = values[9]
+    website = values[4]
+    if website:
+        site_cell = ws.cell(row=row, column=5, value="Website →")
+        site_cell.hyperlink = website
+        site_cell.font = Font(name="Arial", size=9, color="185FA5", underline="single")
+        site_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    link = values[10]
     if link:
-        link_cell = ws.cell(row=row, column=10, value="Apply →")
+        link_cell = ws.cell(row=row, column=11, value="Apply →")
         link_cell.hyperlink = link
         link_cell.font = Font(name="Arial", size=9, color="185FA5", underline="single")
         link_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.row_dimensions[row].height = 18
+    for col, label in ((12, "WSU Alumni →"), (13, "Recruiters →")):
+        search_cell = ws.cell(row=row, column=col, value=label)
+        search_cell.hyperlink = values[col - 1]
+        search_cell.font = Font(name="Arial", size=9, color="185FA5", underline="single")
+        search_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.row_dimensions[row].height = 60
     return score
 
 

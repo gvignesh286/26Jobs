@@ -61,21 +61,32 @@ If this secret isn't set, the scraper just skips the notification — the Excel 
 
 `jobs.xlsx` has two tabs:
 - **Internship Matches** — every qualifying posting
-- **Startups** — the same postings, filtered to just companies tagged `startup: True` in `COMPANIES` (private/venture-funded companies; public/large-cap ones like Palantir, Snowflake, Stripe stay in the main tab only)
+- **Startups** — narrowed to companies tagged `startup: True` in `COMPANIES` **and** located in Seattle, the SF Bay Area, Texas, Arizona, or remote (`STARTUP_TAB_LOCATION_RE` at the top of `scraper.py`). Public/large-cap companies (Palantir, Snowflake, Stripe...) and startup postings outside those regions stay in the main tab only.
 
 Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns (same on both tabs):
 
 | Column | What it shows |
 |---|---|
+| Company Website | Click "Website →" — the company's homepage |
 | Match % | Fit score, color coded |
 | Fit | Strong Fit (70+) / Good Fit (55+) / Possible Fit (50+) |
 | Source | Which ATS it came from (gh / lever / ashby) |
 | Why It Matched | The specific skills/signals that drove the score |
 | Link | Click "Apply →" to go straight to the posting |
+| WSU Alumni Search | Click "WSU Alumni →" — opens a LinkedIn people search for `{Company} Washington State University`, logged in as you |
+| Recruiter Search | Click "Recruiters →" — opens a LinkedIn people search for `{Company} university recruiting` |
+| LinkedIn Note Draft | A ready-to-send connection note (under 300 chars), tailored to the role — pick a person from the search above and paste this in |
+| Email Draft | A longer version for email/InMail, with a subject line and your contact info already filled in |
 | Status | Update yourself as you apply |
 | Notes | Your own notes per job |
 
 The current `jobs.xlsx` (every match found to date) is also attached directly to each Discord message, so you don't need to open GitHub to see the full list — just download the attachment from Discord.
+
+### On the outreach columns — what this does and doesn't do
+The search-link and message-draft columns are meant to speed up warm outreach, not automate it:
+- **No LinkedIn scraping.** The two search links just open LinkedIn's own people-search with useful filters pre-filled — you still browse the results and pick a real person yourself, logged into your own account. Automating LinkedIn scraping violates their ToS and risks your account getting flagged.
+- **No auto-sending.** The message drafts are text sitting in a cell. Nothing sends anything on your behalf — you copy the draft, personalize it for whoever you found, and send it yourself from LinkedIn/email.
+- The message draft picks its "why I'd be a good fit" line based on which of your skills matched that specific posting (ML-heavy roles get the APEX Stock Scanner pitch, web-heavy roles get TravelBuddy/the hackathon project, data-heavy roles get the stock-analysis/trail-mapping projects) — tune the wording in `HIGHLIGHTS` at the top of `scraper.py` if it doesn't sound like you.
 
 ---
 
