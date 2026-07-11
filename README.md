@@ -12,7 +12,9 @@ Instead of scraping LinkedIn (which kept getting blocked/rate-limited), this pul
 - **Lever** (`api.lever.co`)
 - **Ashby** (`api.ashbyhq.com`)
 
-These are JSON APIs meant to be publicly readable (they power the "Careers" page on each company's own site), so there's no blocking, no API key, and no cost. The tradeoff: it only sees companies that use one of these three platforms, and it needs a curated company list — that list lives at the top of `scraper.py` as `COMPANIES`, currently ~59 companies split across Seattle-area startups (Rover, Outreach, Highspot, Smartsheet, Amperity, Textio, Qumulo, PayScale, Bungie, Adaptive Biotechnologies...), remote-friendly AI/tech startups (Anthropic, OpenAI, Perplexity, Notion, Ramp, Together AI...), and larger tech companies (Stripe, Databricks, Coinbase, MongoDB...).
+These are JSON APIs meant to be publicly readable (they power the "Careers" page on each company's own site), so there's no blocking, no API key, and no cost. The tradeoff: it only sees companies that use one of these three platforms, and it needs a curated company list — that list lives at the top of `scraper.py` as `COMPANIES`, currently **126 companies** split across Seattle-area startups (Rover, Outreach, Highspot, Smartsheet, Amperity, Textio, Qumulo, PayScale, Bungie, Adaptive Biotechnologies...), remote-friendly AI/tech startups (Anthropic, OpenAI, Perplexity, Notion, Ramp, Together AI, Cohere, LangChain...), and larger/public tech companies (Stripe, Databricks, Coinbase, MongoDB, Palantir, Snowflake, Cloudflare...).
+
+The company list got expanded from 59 → 126 because most of the daily "new" postings were the same handful of open reqs getting deduped day after day — a bigger candidate pool is what actually drives more genuinely-new matches per day, not a lower score bar. If volume drops off again later (e.g. once summer 2027 recruiting season winds down), add more companies rather than lowering `MIN_SCORE_TO_INCLUDE`.
 
 **To add a company:** find its careers page — if the URL looks like `jobs.lever.co/COMPANY`, `boards.greenhouse.io/COMPANY`, or `jobs.ashbyhq.com/COMPANY`, that `COMPANY` slug is the token. Add an entry to `COMPANIES` with that token and platform. The scraper skips (and logs) any token that doesn't resolve, so a bad guess never breaks the run.
 
@@ -57,7 +59,11 @@ If this secret isn't set, the scraper just skips the notification — the Excel 
 
 ## Viewing your jobs
 
-Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns:
+`jobs.xlsx` has two tabs:
+- **Internship Matches** — every qualifying posting
+- **Startups** — the same postings, filtered to just companies tagged `startup: True` in `COMPANIES` (private/venture-funded companies; public/large-cap ones like Palantir, Snowflake, Stripe stay in the main tab only)
+
+Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns (same on both tabs):
 
 | Column | What it shows |
 |---|---|
