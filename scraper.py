@@ -232,6 +232,17 @@ COMPANIES = [
     {"name": "Render", "platform": "ashby", "token": "render", "startup": True, "website": "https://render.com"},
     {"name": "Railway", "platform": "ashby", "token": "railway", "startup": True, "website": "https://railway.com"},
     {"name": "Warp", "platform": "greenhouse", "token": "warp", "startup": True, "website": "https://www.warp.dev"},
+
+    # ── Texas / Arizona coverage (added for the Startups tab region filter) ──
+    {"name": "Carvana", "platform": "greenhouse", "token": "carvana", "startup": False, "website": "https://www.carvana.com"},
+    {"name": "Axon", "platform": "greenhouse", "token": "axon", "startup": False, "website": "https://www.axon.com"},
+    {"name": "CS Disco", "platform": "greenhouse", "token": "disco", "startup": False, "website": "https://www.csdisco.com"},
+    {"name": "Bazaarvoice", "platform": "lever", "token": "bazaarvoice", "startup": False, "website": "https://www.bazaarvoice.com"},
+    {"name": "Homeward", "platform": "greenhouse", "token": "homeward", "startup": True, "website": "https://www.homeward.com"},
+    {"name": "ShiftKey", "platform": "ashby", "token": "shiftkey", "startup": True, "website": "https://www.shiftkey.com"},
+    {"name": "AlertMedia", "platform": "greenhouse", "token": "alertmedia", "startup": True, "website": "https://www.alertmedia.com"},
+    {"name": "Convey", "platform": "ashby", "token": "convey", "startup": True, "website": "https://www.convey.com"},
+    {"name": "Shipwell", "platform": "greenhouse", "token": "shipwell", "startup": True, "website": "https://www.shipwell.com"},
 ]
 
 # Only postings whose title looks like an internship / co-op / new-grad /
