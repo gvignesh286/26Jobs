@@ -27,6 +27,16 @@ for j in jobs:
 
 **To add a company:** find its careers page — if the URL looks like `jobs.lever.co/COMPANY`, `boards.greenhouse.io/COMPANY`, or `jobs.ashbyhq.com/COMPANY`, that `COMPANY` slug is the token. Add an entry to `COMPANIES` with that token and platform. The scraper skips (and logs) any token that doesn't resolve, so a bad guess never breaks the run.
 
+### Layered source: SimplifyJobs aggregator
+On top of the 135 hand-picked companies, `fetch_simplify()` pulls from [SimplifyJobs/Summer2026-Internships](https://github.com/SimplifyJobs/Summer2026-Internships)'s `listings.json` — a community-maintained, bot-updated (every 30-60 min) file aggregating postings from thousands of companies across many ATS platforms. This is what actually fixed the "only a couple new postings a day" problem — it found real Seattle (TikTok, ByteDance, Amazon, Docugami, OfferUp) and Texas (Copart, Optiver, Citadel, Exowatt) postings that the 135-company list had no way to reach.
+
+Tradeoffs vs. the direct ATS sources:
+- **No description text** — the aggregator only gives title/company/location/category, so `CATEGORY_TEXT` substitutes generic category-based text (e.g. "software engineering full stack...") for scoring purposes. This means Simplify-sourced postings in the same category tend to land on similar scores — less differentiated than ATS-sourced postings, which get scored against real job descriptions.
+- **Degree filtering happens at the source** — the JSON has a `degrees` field per posting; we only keep entries listing `"Bachelor's"`, same undergrad-only bar as everywhere else.
+- **Company-level defense blocklist** (`DEFENSE_COMPANY_BLOCKLIST`) — without description text, the usual `DOMAIN_EXCLUDE_RE` keyword check can miss defense/military-hardware companies whose internship titles don't literally say "aerospace" (e.g. Anduril, Saronic). Add a company name here if another one slips through.
+- **Cross-source dedup** — if a company is tracked both directly (via `COMPANIES`) and shows up in the aggregator for the same role, the direct-ATS copy wins (real description text beats the synthetic one), and the Simplify duplicate is dropped by company+title match.
+- **It's community-scraped, not an official API** — if the repo's schema or URL ever changes, `fetch_simplify()` will need updating; it fails gracefully (prints an error, doesn't break the other 135 sources) if the fetch fails.
+
 ## How filtering + scoring works
 
 1. **Title filter** — only postings whose title contains `intern`, `co-op`, `new grad`, or `early career` survive at all (drops the senior/staff SWE postings that are also on these boards).

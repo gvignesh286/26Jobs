@@ -410,6 +410,79 @@ def fetch_ashby(company: dict) -> list[dict]:
 
 FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetch_ashby}
 
+# ── SimplifyJobs aggregator (layered on top of the per-company APIs) ───────
+# Community-maintained, bot-updated every 30-60 min, aggregates postings
+# from thousands of companies across many ATS platforms into one JSON file.
+# Covers far more companies than we could ever hand-curate — but it has no
+# description text, so CATEGORY_TEXT below substitutes for it in scoring.
+SIMPLIFY_LISTINGS_URL = (
+    "https://raw.githubusercontent.com/SimplifyJobs/"
+    "Summer2026-Internships/dev/.github/scripts/listings.json"
+)
+
+CATEGORY_TEXT = {
+    "Software": "software engineering full stack backend frontend rest api",
+    "Software Engineering": "software engineering full stack backend frontend rest api",
+    "AI/ML/Data": "artificial intelligence machine learning data analysis data science python",
+    "Data Science, AI & Machine Learning": "artificial intelligence machine learning data analysis data science python",
+    "Product": "product management business analyst data analytics",
+    "Product Management": "product management business analyst data analytics",
+    # Hardware/Hardware Engineering/Quant/Quantitative Finance intentionally
+    # left out — no skill-boost text, so they fail the skill-overlap gate
+    # naturally rather than needing a separate category allowlist.
+}
+
+# DOMAIN_EXCLUDE_RE can't catch these — the aggregator has no description
+# text, and a defense-hardware company's internship title often doesn't
+# literally say "aerospace"/"military" (e.g. "Software Engineer Intern" at
+# Anduril). Company-level blocking is the only reliable signal here.
+DEFENSE_COMPANY_BLOCKLIST = {
+    "anduril", "spacex", "space exploration technologies", "lockheed martin",
+    "boeing", "raytheon", "rtx", "rtx corporation", "northrop grumman",
+    "general dynamics", "l3harris", "leidos", "booz allen hamilton", "saic",
+    "bae systems", "textron", "saronic", "shield ai", "epirus", "castelion",
+    "firefly aerospace", "rocket lab", "blue origin", "sierra space",
+    "redwire", "redwire space", "varda", "varda space", "hadrian",
+    "vannevar labs", "applied intuition",
+}
+
+
+def fetch_simplify() -> list[dict]:
+    r = requests.get(SIMPLIFY_LISTINGS_URL, timeout=30)
+    r.raise_for_status()
+    entries = r.json()
+
+    known_websites = {c["name"].lower(): c["website"] for c in COMPANIES}
+    known_startup = {c["name"].lower(): c["startup"] for c in COMPANIES}
+
+    jobs = []
+    for e in entries:
+        if not e.get("active") or not e.get("is_visible", True):
+            continue
+        if "Bachelor's" not in (e.get("degrees") or []):
+            continue  # undergrad-only — same bar as the ATS sources
+        title = e.get("title", "")
+        company = e.get("company_name", "")
+        key = company.lower()
+        if key in DEFENSE_COMPANY_BLOCKLIST:
+            continue
+        posted_ts = e.get("date_posted")
+        jobs.append({
+            "id": f"simplify:{e['id']}",
+            "title": title,
+            "companyName": company,
+            "isStartup": known_startup.get(key, False),
+            "website": known_websites.get(key, e.get("company_url", "")),
+            "location": "; ".join(e.get("locations", [])),
+            "descriptionText": CATEGORY_TEXT.get(e.get("category", ""), ""),
+            "link": e.get("url", ""),
+            "postedAt": (
+                datetime.fromtimestamp(posted_ts, tz=timezone.utc).isoformat()
+                if posted_ts else ""
+            ),
+        })
+    return jobs
+
 
 def scrape_jobs() -> list[dict]:
     all_jobs = []
@@ -428,6 +501,25 @@ def scrape_jobs() -> list[dict]:
         except Exception as e:
             print(f"{company['name']:28s} ({company['platform']:10s}): FAILED — {e}")
         time.sleep(0.3)  # be polite to free public APIs
+
+    # Same job can be discovered both directly (ATS) and via the aggregator
+    # — the direct-ATS copy has real description text, so it wins ties.
+    seen_pairs = {(j["companyName"].lower(), j["title"].lower()) for j in all_jobs}
+
+    try:
+        simplify_jobs = fetch_simplify()
+        internship_jobs = [
+            j for j in simplify_jobs
+            if INTERNSHIP_TITLE_RE.search(j["title"])
+            and not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
+        ]
+        print(f"{'SimplifyJobs aggregator':28s} ({'simplify':10s}): "
+              f"{len(simplify_jobs):4d} total, {len(internship_jobs):3d} internship-tagged")
+        all_jobs.extend(internship_jobs)
+    except Exception as e:
+        print(f"{'SimplifyJobs aggregator':28s} ({'simplify':10s}): FAILED — {e}")
+
     return all_jobs
 
 
