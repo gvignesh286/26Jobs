@@ -33,6 +33,7 @@ PROFILE = {
         "data analyst", "data analytics", "business analyst",
         "data visualization", "tableau", "power bi", "excel", "kpi",
         "a/b testing", "statistics", "artificial intelligence",
+        "product management", "product manager", "roadmap", "stakeholder",
     ],
     # Weighted higher than everything else — explicitly Seattle + remote per Giri's ask.
     "preferred_locations": [
@@ -531,15 +532,22 @@ YC_HEADERS = {
 }
 
 # Only role categories aligned with the resume — skips Design/Recruiting/
-# Sales/Marketing/Legal/Finance/Operations entirely.
-YC_CATEGORY_URLS = [
-    "https://www.workatastartup.com/jobs/l/software-engineer",
-    "https://www.workatastartup.com/jobs/l/product-manager",
-    "https://www.workatastartup.com/jobs/l/science",
-]
+# Sales/Marketing/Legal/Finance/Operations entirely. Value is fallback
+# scoring text for that category — used when a posting's own `roleType`
+# field is missing, which turns out to be common (e.g. plenty of postings
+# on the product-manager category page have roleType: null).
+YC_CATEGORY_URLS = {
+    "https://www.workatastartup.com/jobs/l/software-engineer":
+        "software engineering full stack backend frontend",
+    "https://www.workatastartup.com/jobs/l/product-manager":
+        "product management roadmap stakeholder data analytics business analyst",
+    "https://www.workatastartup.com/jobs/l/science":
+        "machine learning artificial intelligence data science research python",
+}
 
 # YC's roleType field maps closely to our own skill vocabulary — used as
-# scoring text in place of the description text this source doesn't have.
+# scoring text in place of the description text this source doesn't have,
+# when present (falls back to the category-level text above otherwise).
 YC_ROLE_TYPE_TEXT = {
     "Full stack": "full stack full-stack frontend backend react node",
     "Backend": "backend rest api python",
@@ -547,6 +555,7 @@ YC_ROLE_TYPE_TEXT = {
     "Machine learning": "machine learning artificial intelligence deep learning python",
     "Data": "data analysis data science python sql",
     "DevOps": "docker ci/cd aws",
+    "Product": "product management roadmap stakeholder data analytics business analyst",
 }
 
 
@@ -554,7 +563,7 @@ def fetch_yc() -> list[dict]:
     known_websites = {c["name"].lower(): c["website"] for c in COMPANIES}
     jobs = []
     seen_ids = set()
-    for url in YC_CATEGORY_URLS:
+    for url, category_text in YC_CATEGORY_URLS.items():
         try:
             r = requests.get(url, headers=YC_HEADERS, timeout=20)
             r.raise_for_status()
@@ -570,7 +579,7 @@ def fetch_yc() -> list[dict]:
                 one_liner = j.get("companyOneLiner", "") or ""
                 if key in DEFENSE_COMPANY_BLOCKLIST or DOMAIN_EXCLUDE_RE.search(one_liner):
                     continue
-                role_text = YC_ROLE_TYPE_TEXT.get(j.get("roleType", ""), "")
+                role_text = YC_ROLE_TYPE_TEXT.get(j.get("roleType") or "", "") or category_text
                 jobs.append({
                     "id": f"yc:{j['id']}",
                     "title": j.get("title", ""),
@@ -663,8 +672,14 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     full_text = f"{title} {description}"
 
     # ── Hard title filter — drop regardless of skill/keyword overlap ──────
-    if HARD_AVOID_TITLE_RE.search(title):
-        return 0, [f"filtered: '{HARD_AVOID_TITLE_RE.search(title).group(0)}' in title"]
+    # Exception: an explicit intern/co-op/fellowship/new-grad label overrides
+    # this. "manager"/"lead"/"staff" etc. are meant to catch seniority, but
+    # "manager" is also just the literal job title for Product roles at any
+    # level — "Product Manager Summer 2027 Intern" was getting killed by the
+    # bare "manager" match despite plainly self-labeling as an internship.
+    hard_hit = HARD_AVOID_TITLE_RE.search(title)
+    if hard_hit and not INTERNSHIP_TITLE_RE.search(title):
+        return 0, [f"filtered: '{hard_hit.group(0)}' in title"]
 
     # ── Domain exclusion — cybersecurity / aerospace, title or description ─
     domain_hit = DOMAIN_EXCLUDE_RE.search(full_text)
