@@ -309,18 +309,7 @@ NON_US_LOCATION_RE = re.compile(
     r"south africa|new zealand|austria|vienna|belgium|brussels)\b"
 )
 
-MIN_SCORE_TO_INCLUDE = 50  # below this, a posting is dropped entirely (not just low-ranked)
-
-# YC (yc:) postings structurally can't reach the same score ceiling as the
-# other sources — no posting date (0 of the 0-20 recency points are ever
-# achievable) and thinner synthetic description text than a real job
-# description gives. Verified on real data: the best YC match found in
-# testing (Backend Engineer @ Pocket, SF, 4 matched skills) scored 47 —
-# below 50 despite being a clearly strong fit. This is a separately
-# calibrated bar for that source only, not a general loosening — every
-# entry that clears it still needs 2+ genuine skill matches (the "no
-# matching skills" gate in score_job isn't skipped for this source).
-YC_MIN_SCORE_TO_INCLUDE = 30
+MIN_SCORE_TO_INCLUDE = 55  # below this, a posting is dropped entirely (not just low-ranked) — uniform across every source, no exceptions
 
 # The Startups sheet is further narrowed to these regions on top of the
 # startup:true tag — Seattle, SF Bay Area, Texas, Arizona, or remote.
@@ -464,7 +453,19 @@ DEFENSE_COMPANY_BLOCKLIST = {
     "bae systems", "textron", "saronic", "shield ai", "epirus", "castelion",
     "firefly aerospace", "rocket lab", "blue origin", "sierra space",
     "redwire", "redwire space", "varda", "varda space", "hadrian",
-    "vannevar labs", "applied intuition", "hop aero",
+    "vannevar labs", "applied intuition", "hop aero", "caci", "caci international",
+}
+
+# Companies discovered via SimplifyJobs (not in the curated COMPANIES list,
+# so isStartup would otherwise default to False) confirmed to be genuine
+# startups — this is what actually gets non-SF startups onto the Startups
+# tab, since without this, only YC-sourced jobs (which cluster in SF) were
+# ever tagged isStartup=True. Grows manually as new ones get spotted;
+# defaults stay False for anything not listed here (including large
+# companies like Amazon/TikTok/Citadel that also show up via Simplify).
+ADDITIONAL_STARTUP_COMPANIES = {
+    "docugami",   # Kirkland, WA — AI document startup
+    "exowatt",    # Austin, TX — energy hardware startup
 }
 
 
@@ -475,6 +476,7 @@ def fetch_simplify() -> list[dict]:
 
     known_websites = {c["name"].lower(): c["website"] for c in COMPANIES}
     known_startup = {c["name"].lower(): c["startup"] for c in COMPANIES}
+    known_startup.update({name: True for name in ADDITIONAL_STARTUP_COMPANIES})
 
     jobs = []
     for e in entries:
@@ -706,8 +708,9 @@ def score_job(job: dict) -> tuple[int, list[str]]:
         # YC full-time postings rarely say "new grad" explicitly even when
         # they're accessible — HARD_AVOID_TITLE_RE already screened out
         # senior/staff/founding-engineer/CTO/lead titles, so what's left
-        # gets partial credit rather than zero.
-        score += 15
+        # gets partial credit rather than zero. Same 55-point bar as every
+        # other source applies on top of this — no separate threshold.
+        score += 23
         reasons.append("YC full-time (undergrad-eligible)")
 
     # ── Location (0-20) ───────────────────────────────────────────────────
@@ -748,20 +751,32 @@ def score_job(job: dict) -> tuple[int, list[str]]:
 
 
 def chance_label(score: int) -> str:
-    if score >= 70: return "Strong Fit"
-    if score >= 55: return "Good Fit"
+    # Re-tiered so all 3 labels are still reachable now that
+    # MIN_SCORE_TO_INCLUDE=55 means nothing below 55 ever gets written.
+    if score >= 80: return "Strong Fit"
+    if score >= 65: return "Good Fit"
     return "Possible Fit"
 
 
 def chance_color(score: int) -> str:
-    if score >= 70: return "C6EFCE"   # green
-    if score >= 55: return "FFEB9C"   # yellow
+    if score >= 80: return "C6EFCE"   # green
+    if score >= 65: return "FFEB9C"   # yellow
     return "FFCC99"                    # orange
 
 
 # ── Deduplicate against existing sheet ───────────────────────────────────
-MAIN_SHEET_NAME = "Internship Matches"
+INTERNSHIPS_SHEET_NAME = "Internships"
+JOBS_SHEET_NAME = "Jobs"
 STARTUP_SHEET_NAME = "Startups"
+
+# Tab routing: literal internship/co-op/fellowship titles go to the
+# Internships tab; everything else that qualified (new-grad, YC full-time)
+# goes to Jobs. Startups is a same-day mirror of both, filtered further.
+JOB_TYPE_TITLE_RE = re.compile(r"(?i)\b(intern(ship)?s?|co-?op|fellow(ship)?s?)\b")
+
+
+def is_internship_type(title: str) -> bool:
+    return bool(JOB_TYPE_TITLE_RE.search(title))
 
 
 def load_existing_ids(path: str) -> set:
@@ -769,8 +784,14 @@ def load_existing_ids(path: str) -> set:
         return set()
     try:
         wb = openpyxl.load_workbook(path)
-        ws = wb[MAIN_SHEET_NAME] if MAIN_SHEET_NAME in wb.sheetnames else wb.active
-        return {str(row[0]) for row in ws.iter_rows(min_row=2, values_only=True) if row[0]}
+        ids = set()
+        for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME):
+            if name in wb.sheetnames:
+                ids.update(str(row[0]) for row in wb[name].iter_rows(min_row=2, values_only=True) if row[0])
+        if not ids and wb.sheetnames:
+            # Backward compat with the old single-sheet layout
+            ids.update(str(row[0]) for row in wb.active.iter_rows(min_row=2, values_only=True) if row[0])
+        return ids
     except Exception:
         return set()
 
@@ -790,13 +811,11 @@ def _pick_highlight(matched_skills: list[str]) -> dict:
     return HIGHLIGHTS["default"]
 
 
-def alumni_search_link(company: str) -> str:
+# WSU alumni search — kept as the single link instead of two separate ones
+# (alumni + recruiter). A fellow Coug is a far better warm-intro target
+# than a random recruiter, so this is "the better option" between them.
+def linkedin_search_link(company: str) -> str:
     query = f"{company} {CONTACT['school']}"
-    return f"https://www.linkedin.com/search/results/people/?keywords={quote(query)}"
-
-
-def recruiter_search_link(company: str) -> str:
-    query = f"{company} university recruiting OR campus recruiting"
     return f"https://www.linkedin.com/search/results/people/?keywords={quote(query)}"
 
 
@@ -839,11 +858,11 @@ def generate_email(job: dict) -> str:
 HEADERS = [
     "Job ID", "Date Found", "Title", "Company", "Company Website", "Location",
     "Match %", "Fit", "Source", "Why It Matched", "Link",
-    "WSU Alumni Search", "Recruiter Search", "LinkedIn Note Draft", "Email Draft",
+    "LinkedIn Search", "LinkedIn Note Draft", "Email Draft",
     "Status", "Notes",
 ]
 
-COL_WIDTHS = [24, 12, 34, 24, 22, 20, 10, 13, 10, 40, 14, 16, 16, 50, 50, 14, 24]
+COL_WIDTHS = [24, 12, 34, 24, 22, 20, 10, 13, 10, 40, 14, 16, 50, 50, 14, 24]
 
 NAVY = "1A3A5C"
 WHITE = "FFFFFF"
@@ -857,33 +876,36 @@ def thin_border():
 
 
 def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
-    """Returns the (job, score) pairs actually written to the main sheet —
-    used to build the Discord notification so it only reports what's
-    genuinely new today. The Startups sheet is a same-day mirror subset."""
+    """Returns the (job, score) pairs actually written — used to build the
+    Discord notification so it only reports what's genuinely new today.
+    Routes each job to Internships or Jobs by title; Startups is a
+    same-day mirror of both, filtered further by startup tag + region."""
     existing_ids = load_existing_ids(path)
     added = []
 
     if os.path.exists(path):
         wb = openpyxl.load_workbook(path)
-        ws_main = wb[MAIN_SHEET_NAME] if MAIN_SHEET_NAME in wb.sheetnames else wb.active
-        ws_main.title = MAIN_SHEET_NAME
-        ws_startup = wb[STARTUP_SHEET_NAME] if STARTUP_SHEET_NAME in wb.sheetnames else None
-        if ws_startup is None:
-            ws_startup = wb.create_sheet(STARTUP_SHEET_NAME)
-            _write_header(ws_startup)
     else:
         wb = openpyxl.Workbook()
-        ws_main = wb.active
-        ws_main.title = MAIN_SHEET_NAME
-        _write_header(ws_main)
-        ws_startup = wb.create_sheet(STARTUP_SHEET_NAME)
-        _write_header(ws_startup)
+        wb.remove(wb.active)
+
+    sheets = {}
+    for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME, STARTUP_SHEET_NAME):
+        if name in wb.sheetnames:
+            sheets[name] = wb[name]
+        else:
+            sheets[name] = wb.create_sheet(name)
+            _write_header(sheets[name])
+    ws_internships, ws_jobs, ws_startup = (
+        sheets[INTERNSHIPS_SHEET_NAME], sheets[JOBS_SHEET_NAME], sheets[STARTUP_SHEET_NAME]
+    )
 
     startup_count = 0
     for job in jobs_scored:
         if job["id"] in existing_ids:
             continue
-        score = _append_row(ws_main, job)
+        target_ws = ws_internships if is_internship_type(job["title"]) else ws_jobs
+        score = _append_row(target_ws, job)
         if score is not None:
             added.append((job, score))
             is_target_region = STARTUP_TAB_LOCATION_RE.search((job.get("location") or "").lower())
@@ -891,10 +913,10 @@ def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
                 _append_row(ws_startup, job)
                 startup_count += 1
 
-    print(f"Added {len(added)} new internship postings "
+    print(f"Added {len(added)} new postings "
           f"({startup_count} startup, Seattle/SF Bay/TX/AZ/remote) to the sheet.")
 
-    for ws in (ws_main, ws_startup):
+    for ws in (ws_internships, ws_jobs, ws_startup):
         ws.freeze_panes = "A2"
         for i, width in enumerate(COL_WIDTHS, 1):
             ws.column_dimensions[get_column_letter(i)].width = width
@@ -917,8 +939,7 @@ def _write_header(ws):
 
 def _append_row(ws, job: dict) -> int | None:
     score, reasons = score_job(job)
-    threshold = YC_MIN_SCORE_TO_INCLUDE if job["id"].startswith("yc:") else MIN_SCORE_TO_INCLUDE
-    if score < threshold:
+    if score < MIN_SCORE_TO_INCLUDE:
         return None  # not a strong enough fit — don't clutter the sheet
 
     row = ws.max_row + 1
@@ -938,8 +959,7 @@ def _append_row(ws, job: dict) -> int | None:
         source,
         ", ".join(reasons[:4]),
         job.get("link", ""),
-        alumni_search_link(company),
-        recruiter_search_link(company),
+        linkedin_search_link(company),
         generate_linkedin_note(job),
         generate_email(job),
         "Not Applied",
@@ -949,7 +969,7 @@ def _append_row(ws, job: dict) -> int | None:
     for col, val in enumerate(values, 1):
         cell = ws.cell(row=row, column=col, value=val)
         cell.font = Font(name="Arial", size=9)
-        cell.alignment = Alignment(vertical="center", wrap_text=(col in [3, 10, 14, 15]))
+        cell.alignment = Alignment(vertical="center", wrap_text=(col in [3, 10, 13, 14]))
         cell.border = thin_border()
         if col not in [7, 8]:
             cell.fill = PatternFill("solid", fgColor=fill_color)
@@ -978,11 +998,10 @@ def _append_row(ws, job: dict) -> int | None:
         link_cell.font = Font(name="Arial", size=9, color="185FA5", underline="single")
         link_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    for col, label in ((12, "WSU Alumni →"), (13, "Recruiters →")):
-        search_cell = ws.cell(row=row, column=col, value=label)
-        search_cell.hyperlink = values[col - 1]
-        search_cell.font = Font(name="Arial", size=9, color="185FA5", underline="single")
-        search_cell.alignment = Alignment(horizontal="center", vertical="center")
+    search_cell = ws.cell(row=row, column=12, value="LinkedIn Search →")
+    search_cell.hyperlink = values[11]
+    search_cell.font = Font(name="Arial", size=9, color="185FA5", underline="single")
+    search_cell.alignment = Alignment(horizontal="center", vertical="center")
 
     ws.row_dimensions[row].height = 60
     return score

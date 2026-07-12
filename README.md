@@ -43,10 +43,13 @@ Tradeoffs vs. the direct ATS sources:
 We looked at Dice too — **not built**. Dice's `robots.txt` explicitly disallows the job-search paths (`/jobs?q*`, `/job`, `/jobsearch/`), which is Dice stating they don't want automated access to listings. Same category of thing as the LinkedIn scraping this project already avoids.
 
 Tradeoffs / things to know about the YC source specifically:
-- **Covers both internships and full-time roles** — unlike every other source, `scrape_jobs()` does *not* require `INTERNSHIP_TITLE_RE` to match for YC postings, since small startups rarely label roles "new grad" the way big companies do. Filtering instead relies entirely on `HARD_AVOID_TITLE_RE` (which now also excludes `founding` — as in "Founding Engineer" — and `head of`, on top of the usual senior/staff/lead/manager/CTO exclusions) and `NON_TECHNICAL_ROLE_RE`.
-- **Separately calibrated score threshold** (`YC_MIN_SCORE_TO_INCLUDE = 30`, vs. 50 everywhere else) — YC postings have no posting date (0 of the 0-20 recency points are ever achievable) and thinner synthetic description text (`YC_ROLE_TYPE_TEXT` + the company's one-liner, in place of a real job description) than the other sources. Verified on real data: the strongest YC match found in testing (Backend Engineer @ Pocket, SF, 4 matched skills) scored 47 under the standard scale — a clearly strong fit that the normal 50-point bar would have dropped. Every YC entry that clears the lower bar still needs 2+ genuine skill matches; the gate isn't skipped, just recalibrated for a source that structurally can't reach the same ceiling.
+- **Covers both internships and full-time roles** — unlike every other source, `scrape_jobs()` does *not* require `INTERNSHIP_TITLE_RE` to match for YC postings, since small startups rarely label roles "new grad" the way big companies do. Filtering instead relies entirely on `HARD_AVOID_TITLE_RE` (which now also excludes `founding` — as in "Founding Engineer"/"Founding Solutions Engineer" — and `head of`, on top of the usual senior/staff/lead/manager/CTO exclusions) and `NON_TECHNICAL_ROLE_RE`.
+- **Same 55-point bar as every other source, no exception** — YC postings have no posting date (0 of the 0-20 recency points are ever achievable) and thinner synthetic description text (`YC_ROLE_TYPE_TEXT` + the company's one-liner, in place of a real job description) than the other sources. To compensate without lowering the bar itself, the YC full-time title-tier credit is boosted to 23 (vs. 15 originally) — genuinely strong matches (good skill overlap + a preferred location) can still clear 55; weaker ones correctly get filtered out like everywhere else.
 - **Defense-company screening uses the company's one-liner, not just a name blocklist** — YC gives us `companyOneLiner` (e.g. Hop Aero's "Rocket cargo delivery to contested environments"), so `fetch_yc()` runs that text through `DOMAIN_EXCLUDE_RE` in addition to checking `DEFENSE_COMPANY_BLOCKLIST` by name.
 - **More fragile than the JSON-API sources** — if YC changes their frontend framework or page markup, `fetch_yc()`'s regex extraction may break and need updating. It fails gracefully per category URL (prints an error, the other sources keep working).
+
+### Startup-tag gap for aggregator-discovered companies
+The Startups tab only shows postings where `isStartup` is `True`. For the 135 curated `COMPANIES`, that tag is set by hand. For companies discovered only through SimplifyJobs or YC, there's no such data — so `isStartup` defaults to `False` unless the company is YC-sourced (where it's always `True` by definition) or listed in `ADDITIONAL_STARTUP_COMPANIES`. This caused a real bug: Seattle/TX startups found via SimplifyJobs (Docugami in Kirkland, Exowatt in Austin) were invisible on the Startups tab even though they qualified, while only YC entries (which cluster in SF) ever showed up — making the tab look SF-only. Fixed by adding known-good companies to `ADDITIONAL_STARTUP_COMPANIES` as they're spotted; it's a manually-grown list, not automatic classification, so add to it whenever a real non-SF startup gets missed.
 
 ## How filtering + scoring works
 
@@ -62,7 +65,7 @@ Tradeoffs / things to know about the YC source specifically:
    - Seattle/WA or remote location — 0-20 pts
    - Recency (posted <7/14/30 days ago) — 0-20 pts
    - Penalties for "5+ years experience", "master's degree required", "security clearance", or any PhD mention — -15 pts each
-8. Only postings scoring **50+** get written to the sheet at all — the point is a short, high-confidence list, not everything ranked.
+8. Only postings scoring **55+** get written to the sheet at all — the point is a short, high-confidence list, not everything ranked. This bar is uniform across every source, including YC (see above for how that source compensates for structurally lower scores without lowering the bar itself).
 
 ## Setup (one time, ~5 minutes)
 
@@ -89,22 +92,22 @@ If this secret isn't set, the scraper just skips the notification — the Excel 
 
 ## Viewing your jobs
 
-`jobs.xlsx` has two tabs:
-- **Internship Matches** — every qualifying posting
-- **Startups** — narrowed to companies tagged `startup: True` in `COMPANIES` **and** located in Seattle, the SF Bay Area, Texas, Arizona, or remote (`STARTUP_TAB_LOCATION_RE` at the top of `scraper.py`). Public/large-cap companies (Palantir, Snowflake, Stripe...) and startup postings outside those regions stay in the main tab only.
+`jobs.xlsx` has three tabs:
+- **Internships** — postings whose title is literally an internship, co-op, or fellowship
+- **Jobs** — everything else that qualified (new-grad titles, YC full-time roles) — same 55+ bar, just not internship-labeled
+- **Startups** — a same-day mirror of both tabs above, narrowed to companies tagged `startup: True` **and** located in Seattle, the SF Bay Area, Texas, Arizona, or remote (`STARTUP_TAB_LOCATION_RE`). See "Startup-tag gap" above for how that tag gets set for companies outside the curated `COMPANIES` list.
 
-Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns (same on both tabs):
+Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns (same on all three tabs):
 
 | Column | What it shows |
 |---|---|
 | Company Website | Click "Website →" — the company's homepage |
 | Match % | Fit score, color coded |
-| Fit | Strong Fit (70+) / Good Fit (55+) / Possible Fit (50+) |
-| Source | Which ATS it came from (gh / lever / ashby) |
+| Fit | Strong Fit (80+) / Good Fit (65+) / Possible Fit (55+, floor of the sheet — re-tiered so all 3 labels stay reachable now that nothing below 55 is ever written) |
+| Source | Which ATS it came from (gh / lever / ashby / simplify / yc) |
 | Why It Matched | The specific skills/signals that drove the score |
 | Link | Click "Apply →" to go straight to the posting |
-| WSU Alumni Search | Click "WSU Alumni →" — opens a LinkedIn people search for `{Company} Washington State University`, logged in as you |
-| Recruiter Search | Click "Recruiters →" — opens a LinkedIn people search for `{Company} university recruiting` |
+| LinkedIn Search | Click "LinkedIn Search →" — opens a LinkedIn people search for `{Company} Washington State University`, logged in as you |
 | LinkedIn Note Draft | A ready-to-send connection note (under 300 chars), tailored to the role — pick a person from the search above and paste this in |
 | Email Draft | A longer version for email/InMail, with a subject line and your contact info already filled in |
 | Status | Update yourself as you apply |
@@ -112,9 +115,11 @@ Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns (sam
 
 The current `jobs.xlsx` (every match found to date) is also attached directly to each Discord message, so you don't need to open GitHub to see the full list — just download the attachment from Discord.
 
-### On the outreach columns — what this does and doesn't do
-The search-link and message-draft columns are meant to speed up warm outreach, not automate it:
-- **No LinkedIn scraping.** The two search links just open LinkedIn's own people-search with useful filters pre-filled — you still browse the results and pick a real person yourself, logged into your own account. Automating LinkedIn scraping violates their ToS and risks your account getting flagged.
+### On the LinkedIn Search + message-draft columns — what this does and doesn't do
+These are meant to speed up warm outreach, not automate it:
+- **No LinkedIn scraping.** The link just opens LinkedIn's own people-search with useful filters pre-filled — you still browse the results and pick a real person yourself, logged into your own account. Automating LinkedIn scraping violates their ToS and risks your account getting flagged.
+- **One combined link, not two.** This used to be two separate columns (a WSU-alumni search and a recruiter search); they're now one — a fellow WSU grad is a far better warm-intro target than a random recruiter, so the alumni search is "the better option" between them.
+- **You still need to be logged into LinkedIn in your browser** for the search to show real results rather than a login wall — that's LinkedIn's requirement, not something this link can work around.
 - **No auto-sending.** The message drafts are text sitting in a cell. Nothing sends anything on your behalf — you copy the draft, personalize it for whoever you found, and send it yourself from LinkedIn/email.
 - The message draft picks its "why I'd be a good fit" line based on which of your skills matched that specific posting (ML-heavy roles get the APEX Stock Scanner pitch, web-heavy roles get TravelBuddy/the hackathon project, data-heavy roles get the stock-analysis/trail-mapping projects) — tune the wording in `HIGHLIGHTS` at the top of `scraper.py` if it doesn't sound like you.
 
@@ -128,6 +133,7 @@ All of this lives at the top of `scraper.py`:
 - `PROFILE["skills"]` — add/remove keywords as your stack changes (e.g. once your RAG/stock-analyzer work is resume-ready, keywords like `rag`, `langchain`, `embeddings` are already in here)
 - `PROFILE["preferred_locations"]` — currently Seattle-area + remote only; add other states back if you widen the search
 - `COMPANIES` — add more companies as you find their board tokens
-- `MIN_SCORE_TO_INCLUDE` — currently 50; raise it further (e.g. to 60) if that's still surfacing too much, or lower it if the list feels too thin
+- `MIN_SCORE_TO_INCLUDE` — currently 55, uniform across every source (no per-source exceptions); raise it further if that's still surfacing too much, or lower it if the list feels too thin
+- `ADDITIONAL_STARTUP_COMPANIES` — add a company here if a genuine startup discovered via SimplifyJobs isn't showing up on the Startups tab (see "Startup-tag gap" above)
 - `NON_US_LOCATION_RE` — the sheet is US-only right now; remove a country/city from this pattern (or drop the check in `score_job` entirely) if you want to reopen it to a specific country
 - `INTERNSHIP_TITLE_RE` — loosen this if you also want full-time junior/new-grad SWE roles, not just internships
