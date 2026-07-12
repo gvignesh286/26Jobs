@@ -37,6 +37,17 @@ Tradeoffs vs. the direct ATS sources:
 - **Cross-source dedup** — if a company is tracked both directly (via `COMPANIES`) and shows up in the aggregator for the same role, the direct-ATS copy wins (real description text beats the synthetic one), and the Simplify duplicate is dropped by company+title match.
 - **It's community-scraped, not an official API** — if the repo's schema or URL ever changes, `fetch_simplify()` will need updating; it fails gracefully (prints an error, doesn't break the other 135 sources) if the fetch fails.
 
+### Layered source: Y Combinator's Work at a Startup
+`fetch_yc()` pulls from `workatastartup.com/jobs/l/{software-engineer,product-manager,science}` — the public job listing pages (`robots.txt` allows it, no login needed to view) for [Y Combinator](https://www.ycombinator.com/)-backed startups. No official API: this parses the `data-page` JSON payload the page's Inertia.js frontend embeds server-side. Every listing here is by definition a YC-backed startup, so these always feed the Startups tab.
+
+We looked at Dice too — **not built**. Dice's `robots.txt` explicitly disallows the job-search paths (`/jobs?q*`, `/job`, `/jobsearch/`), which is Dice stating they don't want automated access to listings. Same category of thing as the LinkedIn scraping this project already avoids.
+
+Tradeoffs / things to know about the YC source specifically:
+- **Covers both internships and full-time roles** — unlike every other source, `scrape_jobs()` does *not* require `INTERNSHIP_TITLE_RE` to match for YC postings, since small startups rarely label roles "new grad" the way big companies do. Filtering instead relies entirely on `HARD_AVOID_TITLE_RE` (which now also excludes `founding` — as in "Founding Engineer" — and `head of`, on top of the usual senior/staff/lead/manager/CTO exclusions) and `NON_TECHNICAL_ROLE_RE`.
+- **Separately calibrated score threshold** (`YC_MIN_SCORE_TO_INCLUDE = 30`, vs. 50 everywhere else) — YC postings have no posting date (0 of the 0-20 recency points are ever achievable) and thinner synthetic description text (`YC_ROLE_TYPE_TEXT` + the company's one-liner, in place of a real job description) than the other sources. Verified on real data: the strongest YC match found in testing (Backend Engineer @ Pocket, SF, 4 matched skills) scored 47 under the standard scale — a clearly strong fit that the normal 50-point bar would have dropped. Every YC entry that clears the lower bar still needs 2+ genuine skill matches; the gate isn't skipped, just recalibrated for a source that structurally can't reach the same ceiling.
+- **Defense-company screening uses the company's one-liner, not just a name blocklist** — YC gives us `companyOneLiner` (e.g. Hop Aero's "Rocket cargo delivery to contested environments"), so `fetch_yc()` runs that text through `DOMAIN_EXCLUDE_RE` in addition to checking `DEFENSE_COMPANY_BLOCKLIST` by name.
+- **More fragile than the JSON-API sources** — if YC changes their frontend framework or page markup, `fetch_yc()`'s regex extraction may break and need updating. It fails gracefully per category URL (prints an error, the other sources keep working).
+
 ## How filtering + scoring works
 
 1. **Title filter** — only postings whose title contains `intern`, `co-op`, `new grad`, or `early career` survive at all (drops the senior/staff SWE postings that are also on these boards).

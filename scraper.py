@@ -10,6 +10,7 @@ import os
 import re
 import json
 import time
+import html
 from datetime import datetime, timezone
 from urllib.parse import quote
 import requests
@@ -271,9 +272,12 @@ NON_TECHNICAL_ROLE_RE = re.compile(
 
 # Hard title exclusions — a rising-junior CS undergrad isn't eligible for
 # these regardless of keyword/skill overlap, so drop them before scoring.
-# Also covers grad-degree-track titles (Giri is undergrad-only).
+# Also covers grad-degree-track titles (Giri is undergrad-only), plus
+# founder-level/executive titles common on the YC source (small startups
+# often hire "Founding Engineer"/CTO as an experienced-only role).
 HARD_AVOID_TITLE_RE = re.compile(
-    r"(?i)\b(senior|staff|principal|director|manager|"
+    r"(?i)\b(senior|staff|principal|director|manager|lead|"
+    r"founding|chief technology officer|\bcto\b|head of|"
     r"phd|ph\.d\.|postdoc(toral)?|research scientist|"
     r"graduate program|master'?s?\s+student|phd student|"
     r"doctoral( student)?|graduate researcher|mba)\b"
@@ -306,6 +310,17 @@ NON_US_LOCATION_RE = re.compile(
 )
 
 MIN_SCORE_TO_INCLUDE = 50  # below this, a posting is dropped entirely (not just low-ranked)
+
+# YC (yc:) postings structurally can't reach the same score ceiling as the
+# other sources — no posting date (0 of the 0-20 recency points are ever
+# achievable) and thinner synthetic description text than a real job
+# description gives. Verified on real data: the best YC match found in
+# testing (Backend Engineer @ Pocket, SF, 4 matched skills) scored 47 —
+# below 50 despite being a clearly strong fit. This is a separately
+# calibrated bar for that source only, not a general loosening — every
+# entry that clears it still needs 2+ genuine skill matches (the "no
+# matching skills" gate in score_job isn't skipped for this source).
+YC_MIN_SCORE_TO_INCLUDE = 30
 
 # The Startups sheet is further narrowed to these regions on top of the
 # startup:true tag — Seattle, SF Bay Area, Texas, Arizona, or remote.
@@ -436,6 +451,12 @@ CATEGORY_TEXT = {
 # text, and a defense-hardware company's internship title often doesn't
 # literally say "aerospace"/"military" (e.g. "Software Engineer Intern" at
 # Anduril). Company-level blocking is the only reliable signal here.
+# Used across sources — checked in both fetch_simplify() and fetch_yc(),
+# since neither has description text for DOMAIN_EXCLUDE_RE to catch these
+# by keyword (a defense-hardware company's internship title often doesn't
+# literally say "aerospace"/"military", e.g. Anduril's "Software Engineer
+# Intern", or Hop Aero's "Rocket cargo delivery to contested environments"
+# one-liner not showing up in the title at all).
 DEFENSE_COMPANY_BLOCKLIST = {
     "anduril", "spacex", "space exploration technologies", "lockheed martin",
     "boeing", "raytheon", "rtx", "rtx corporation", "northrop grumman",
@@ -443,7 +464,7 @@ DEFENSE_COMPANY_BLOCKLIST = {
     "bae systems", "textron", "saronic", "shield ai", "epirus", "castelion",
     "firefly aerospace", "rocket lab", "blue origin", "sierra space",
     "redwire", "redwire space", "varda", "varda space", "hadrian",
-    "vannevar labs", "applied intuition",
+    "vannevar labs", "applied intuition", "hop aero",
 }
 
 
@@ -484,6 +505,90 @@ def fetch_simplify() -> list[dict]:
     return jobs
 
 
+# ── Y Combinator's Work at a Startup (layered on top, startup-only) ────────
+# No official API — this parses the `data-page` JSON payload Inertia.js
+# embeds in the public /jobs pages (robots.txt allows it, no login needed
+# to view). More fragile than the JSON-API sources: if YC changes their
+# frontend framework or markup, this may need updating.
+#
+# Every listing here is, by definition, a YC-backed startup — so unlike
+# the other sources, jobs found here are always isStartup=True.
+#
+# Also unlike the other sources: small startups rarely label roles "new
+# grad" the way big companies do, so requiring INTERNSHIP_TITLE_RE would
+# exclude nearly all full-time YC postings. Instead, scrape_jobs() lets
+# anything through here that isn't caught by HARD_AVOID_TITLE_RE (senior/
+# staff/founding engineer/CTO/etc. are already excluded there) or
+# NON_TECHNICAL_ROLE_RE — covering both internships and next-year
+# full-time roles per Giri's request, at the same undergrad-only bar.
+YC_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# Only role categories aligned with the resume — skips Design/Recruiting/
+# Sales/Marketing/Legal/Finance/Operations entirely.
+YC_CATEGORY_URLS = [
+    "https://www.workatastartup.com/jobs/l/software-engineer",
+    "https://www.workatastartup.com/jobs/l/product-manager",
+    "https://www.workatastartup.com/jobs/l/science",
+]
+
+# YC's roleType field maps closely to our own skill vocabulary — used as
+# scoring text in place of the description text this source doesn't have.
+YC_ROLE_TYPE_TEXT = {
+    "Full stack": "full stack full-stack frontend backend react node",
+    "Backend": "backend rest api python",
+    "Frontend": "frontend react javascript typescript",
+    "Machine learning": "machine learning artificial intelligence deep learning python",
+    "Data": "data analysis data science python sql",
+    "DevOps": "docker ci/cd aws",
+}
+
+
+def fetch_yc() -> list[dict]:
+    known_websites = {c["name"].lower(): c["website"] for c in COMPANIES}
+    jobs = []
+    seen_ids = set()
+    for url in YC_CATEGORY_URLS:
+        try:
+            r = requests.get(url, headers=YC_HEADERS, timeout=20)
+            r.raise_for_status()
+            m = re.search(r'data-page="([^"]*)"', r.text)
+            if not m:
+                raise ValueError("data-page attribute not found — page structure may have changed")
+            data = json.loads(html.unescape(m.group(1)))
+            for j in data.get("props", {}).get("jobs", []):
+                if j["id"] in seen_ids:
+                    continue
+                seen_ids.add(j["id"])
+                key = (j.get("companyName") or "").lower()
+                one_liner = j.get("companyOneLiner", "") or ""
+                if key in DEFENSE_COMPANY_BLOCKLIST or DOMAIN_EXCLUDE_RE.search(one_liner):
+                    continue
+                role_text = YC_ROLE_TYPE_TEXT.get(j.get("roleType", ""), "")
+                jobs.append({
+                    "id": f"yc:{j['id']}",
+                    "title": j.get("title", ""),
+                    "companyName": j.get("companyName", ""),
+                    "isStartup": True,
+                    "website": known_websites.get(key) or (
+                        f"https://www.workatastartup.com/companies/{j['companySlug']}"
+                        if j.get("companySlug") else ""
+                    ),
+                    "location": j.get("location", ""),
+                    "descriptionText": f"{role_text} {j.get('companyOneLiner', '')}",
+                    "link": j.get("applyUrl", ""),
+                    "postedAt": "",
+                })
+        except Exception as e:
+            print(f"{'YC ' + url.rsplit('/', 1)[-1]:28s} ({'yc':10s}): FAILED — {e}")
+        time.sleep(0.5)
+    return jobs
+
+
 def scrape_jobs() -> list[dict]:
     all_jobs = []
     for company in COMPANIES:
@@ -517,8 +622,24 @@ def scrape_jobs() -> list[dict]:
         print(f"{'SimplifyJobs aggregator':28s} ({'simplify':10s}): "
               f"{len(simplify_jobs):4d} total, {len(internship_jobs):3d} internship-tagged")
         all_jobs.extend(internship_jobs)
+        seen_pairs.update((j["companyName"].lower(), j["title"].lower()) for j in internship_jobs)
     except Exception as e:
         print(f"{'SimplifyJobs aggregator':28s} ({'simplify':10s}): FAILED — {e}")
+
+    # YC doesn't require INTERNSHIP_TITLE_RE — see fetch_yc()'s docstring
+    # comment for why (small startups rarely say "new grad" explicitly).
+    try:
+        yc_jobs = fetch_yc()
+        qualifying_jobs = [
+            j for j in yc_jobs
+            if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
+        ]
+        print(f"{'Y Combinator (WaaS)':28s} ({'yc':10s}): "
+              f"{len(yc_jobs):4d} total, {len(qualifying_jobs):3d} undergrad-eligible")
+        all_jobs.extend(qualifying_jobs)
+    except Exception as e:
+        print(f"{'Y Combinator (WaaS)':28s} ({'yc':10s}): FAILED — {e}")
 
     return all_jobs
 
@@ -581,6 +702,13 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     elif re.search(r"new grad|university grad|early career", title):
         score += 12
         reasons.append("New-grad title")
+    elif job["id"].startswith("yc:"):
+        # YC full-time postings rarely say "new grad" explicitly even when
+        # they're accessible — HARD_AVOID_TITLE_RE already screened out
+        # senior/staff/founding-engineer/CTO/lead titles, so what's left
+        # gets partial credit rather than zero.
+        score += 15
+        reasons.append("YC full-time (undergrad-eligible)")
 
     # ── Location (0-20) ───────────────────────────────────────────────────
     for loc in PROFILE["preferred_locations"]:
@@ -789,7 +917,8 @@ def _write_header(ws):
 
 def _append_row(ws, job: dict) -> int | None:
     score, reasons = score_job(job)
-    if score < MIN_SCORE_TO_INCLUDE:
+    threshold = YC_MIN_SCORE_TO_INCLUDE if job["id"].startswith("yc:") else MIN_SCORE_TO_INCLUDE
+    if score < threshold:
         return None  # not a strong enough fit — don't clutter the sheet
 
     row = ws.max_row + 1
