@@ -41,7 +41,7 @@ PROFILE = {
         "pullman", "remote",
     ],
     # Soft penalties applied to description text — title-level seniority is
-    # handled separately by HARD_AVOID_TITLE_RE (a hard drop, not a penalty).
+    # handled separately by SENIORITY_AVOID_RE/GRAD_DEGREE_AVOID_RE (a hard drop, not a penalty).
     "avoid_signals": [
         "master's degree required", "msc required", "security clearance",
         "must be a us citizen", "citizenship required",
@@ -271,17 +271,29 @@ NON_TECHNICAL_ROLE_RE = re.compile(
     r"medical|clinical)\b"
 )
 
-# Hard title exclusions — a rising-junior CS undergrad isn't eligible for
-# these regardless of keyword/skill overlap, so drop them before scoring.
-# Also covers grad-degree-track titles (Giri is undergrad-only), plus
-# founder-level/executive titles common on the YC source (small startups
-# often hire "Founding Engineer"/CTO as an experienced-only role).
-HARD_AVOID_TITLE_RE = re.compile(
+# Hard title exclusions, split into two categories that get treated
+# differently in score_job():
+#
+# SENIORITY — an explicit intern/co-op/fellowship/new-grad label in the
+# title overrides this (e.g. "Product Manager Summer 2027 Intern" — the
+# base title "Product Manager" isn't a seniority signal by itself once
+# it's explicitly labeled an internship). Also covers founder-level/
+# executive titles common on the YC source (small startups often hire
+# "Founding Engineer"/CTO as an experienced-only role).
+SENIORITY_AVOID_RE = re.compile(
     r"(?i)\b(senior|staff|principal|director|manager|lead|"
     r"founding|chief technology officer|\bcto\b|head of|"
-    r"phd|ph\.d\.|postdoc(toral)?|research scientist|"
-    r"graduate program|master'?s?\s+student|phd student|"
-    r"doctoral( student)?|graduate researcher|mba)\b"
+    r"postdoc(toral)?|research scientist)\b"
+)
+
+# GRAD-DEGREE — never overridable, regardless of "intern" appearing in the
+# same title. A posting can be both an internship AND require a graduate
+# degree — e.g. a real one found on the UW source: "2026 Fall Applied
+# Science Internship – ... PhD Student Science Recruiting". Undergrad-only
+# eligibility is an absolute requirement, not a seniority judgment call.
+GRAD_DEGREE_AVOID_RE = re.compile(
+    r"(?i)\b(phd|ph\.d\.|phd student|graduate program|"
+    r"master'?s?\s+student|doctoral( student)?|graduate researcher|mba)\b"
 )
 
 # Whole-domain exclusions — checked against title+description since these
@@ -520,7 +532,7 @@ def fetch_simplify() -> list[dict]:
 # Also unlike the other sources: small startups rarely label roles "new
 # grad" the way big companies do, so requiring INTERNSHIP_TITLE_RE would
 # exclude nearly all full-time YC postings. Instead, scrape_jobs() lets
-# anything through here that isn't caught by HARD_AVOID_TITLE_RE (senior/
+# anything through here that isn't caught by SENIORITY_AVOID_RE/GRAD_DEGREE_AVOID_RE (senior/
 # staff/founding engineer/CTO/etc. are already excluded there) or
 # NON_TECHNICAL_ROLE_RE — covering both internships and next-year
 # full-time roles per Giri's request, at the same undergrad-only bar.
@@ -600,6 +612,62 @@ def fetch_yc() -> list[dict]:
     return jobs
 
 
+# ── UW Career Center's public "featured jobs" board ─────────────────────────
+# careers.uw.edu mirrors a small, rotating subset of Handshake postings onto
+# a public WordPress page (no login needed to view — only "Apply" redirects
+# to Handshake). robots.txt allows it. This is NOT a substitute for full
+# Handshake access (~9 jobs at a time, refreshed periodically, not UW's full
+# catalog) — it's a small supplementary source, valuable mainly because it
+# surfaces small/local WA employers that don't appear in any other source.
+#
+# UT Austin (12twenty@Texas) and the UC system (Handshake) were checked and
+# don't have an equivalent public mirror — confirmed by visiting their
+# actual career-services pages, not just inferred.
+UW_JOBS_URL = (
+    "https://careers.uw.edu/jobs/"
+    "?ctag%5B0%5D=full-time-jobs&ctag%5B1%5D=internships"
+    "&ctag%5B2%5D=part-time-jobs&ctag%5B3%5D=remote-jobs"
+    "&stag[]=tech-data-gaming"
+)
+
+UW_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+
+def fetch_uw() -> list[dict]:
+    from bs4 import BeautifulSoup
+
+    r = requests.get(UW_JOBS_URL, headers=UW_HEADERS, timeout=20)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    jobs = []
+    for post in soup.select("#featured-jobs-list > div[id^='post-']"):
+        title_link = post.select_one("h3.entry-title a")
+        if not title_link:
+            continue
+        company = post.select_one(".company_name")
+        summary = post.select_one(".entry-summary .entry-content")
+        job_type_tag = post.select_one(".job-meta .entry-meta-item span:last-child")
+        is_remote = bool(job_type_tag and "remote" in job_type_tag.get_text(strip=True).lower())
+
+        jobs.append({
+            "id": f"uw:{post['id']}",
+            "title": title_link.get_text(strip=True),
+            "companyName": company.get_text(strip=True) if company else "",
+            "isStartup": False,  # unknown per-posting; not guessed for this source
+            "website": "",
+            "location": "Remote" if is_remote else "Washington",
+            "descriptionText": summary.get_text(strip=True) if summary else "",
+            "link": title_link["href"],
+            "postedAt": "",
+        })
+    return jobs
+
+
 def scrape_jobs() -> list[dict]:
     all_jobs = []
     for company in COMPANIES:
@@ -649,8 +717,24 @@ def scrape_jobs() -> list[dict]:
         print(f"{'Y Combinator (WaaS)':28s} ({'yc':10s}): "
               f"{len(yc_jobs):4d} total, {len(qualifying_jobs):3d} undergrad-eligible")
         all_jobs.extend(qualifying_jobs)
+        seen_pairs.update((j["companyName"].lower(), j["title"].lower()) for j in qualifying_jobs)
     except Exception as e:
         print(f"{'Y Combinator (WaaS)':28s} ({'yc':10s}): FAILED — {e}")
+
+    # Same reasoning as YC — small/local employers on UW's board rarely
+    # label roles "new grad" explicitly.
+    try:
+        uw_jobs = fetch_uw()
+        qualifying_jobs = [
+            j for j in uw_jobs
+            if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
+        ]
+        print(f"{'UW Career Center':28s} ({'uw':10s}): "
+              f"{len(uw_jobs):4d} total, {len(qualifying_jobs):3d} undergrad-eligible")
+        all_jobs.extend(qualifying_jobs)
+    except Exception as e:
+        print(f"{'UW Career Center':28s} ({'uw':10s}): FAILED — {e}")
 
     return all_jobs
 
@@ -672,14 +756,20 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     full_text = f"{title} {description}"
 
     # ── Hard title filter — drop regardless of skill/keyword overlap ──────
-    # Exception: an explicit intern/co-op/fellowship/new-grad label overrides
+    # Seniority: an explicit intern/co-op/fellowship/new-grad label overrides
     # this. "manager"/"lead"/"staff" etc. are meant to catch seniority, but
     # "manager" is also just the literal job title for Product roles at any
     # level — "Product Manager Summer 2027 Intern" was getting killed by the
     # bare "manager" match despite plainly self-labeling as an internship.
-    hard_hit = HARD_AVOID_TITLE_RE.search(title)
-    if hard_hit and not INTERNSHIP_TITLE_RE.search(title):
-        return 0, [f"filtered: '{hard_hit.group(0)}' in title"]
+    seniority_hit = SENIORITY_AVOID_RE.search(title)
+    if seniority_hit and not INTERNSHIP_TITLE_RE.search(title):
+        return 0, [f"filtered: '{seniority_hit.group(0)}' in title"]
+
+    # Grad-degree: never overridable — a posting can be both an internship
+    # AND require a graduate degree ("... Internship ... PhD Student ...").
+    grad_hit = GRAD_DEGREE_AVOID_RE.search(title)
+    if grad_hit:
+        return 0, [f"filtered: '{grad_hit.group(0)}' in title"]
 
     # ── Domain exclusion — cybersecurity / aerospace, title or description ─
     domain_hit = DOMAIN_EXCLUDE_RE.search(full_text)
@@ -721,7 +811,7 @@ def score_job(job: dict) -> tuple[int, list[str]]:
         reasons.append("New-grad title")
     elif job["id"].startswith("yc:"):
         # YC full-time postings rarely say "new grad" explicitly even when
-        # they're accessible — HARD_AVOID_TITLE_RE already screened out
+        # they're accessible — SENIORITY_AVOID_RE already screened out
         # senior/staff/founding-engineer/CTO/lead titles, so what's left
         # gets partial credit rather than zero. Same 55-point bar as every
         # other source applies on top of this — no separate threshold.
