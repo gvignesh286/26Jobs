@@ -291,8 +291,15 @@ SENIORITY_AVOID_RE = re.compile(
 # degree — e.g. a real one found on the UW source: "2026 Fall Applied
 # Science Internship – ... PhD Student Science Recruiting". Undergrad-only
 # eligibility is an absolute requirement, not a seniority judgment call.
+# "ph\.d\." with a trailing \b fails on real-world titles like "(Ph.D.)" —
+# both the matched "." and the following ")" are non-word chars, so no
+# word-boundary transition exists there and \b never fires. Found via a
+# real UW posting ("Statistical Scientist (Ph.D.)") slipping through with
+# only a soft penalty instead of the intended hard exclusion. Uses the same
+# lookaround boundary style as skill_pattern() for the phd variants.
 GRAD_DEGREE_AVOID_RE = re.compile(
-    r"(?i)\b(phd|ph\.d\.|phd student|graduate program|"
+    r"(?i)(?<![a-z0-9])(phd|ph\.d\.?)(?![a-z0-9])|"
+    r"\b(phd student|graduate program|"
     r"master'?s?\s+student|doctoral( student)?|graduate researcher|mba)\b"
 )
 
@@ -754,6 +761,7 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     location = (job.get("location") or "").lower()
     description = (job.get("descriptionText") or "").lower()
     full_text = f"{title} {description}"
+    is_uw = job["id"].startswith("uw:")
 
     # ── Hard title filter — drop regardless of skill/keyword overlap ──────
     # Seniority: an explicit intern/co-op/fellowship/new-grad label overrides
@@ -786,15 +794,22 @@ def score_job(job: dict) -> tuple[int, list[str]]:
 
     # ── Skill match (0-35) ────────────────────────────────────────────────
     matched_skills = [s for s, pat in SKILL_PATTERNS if pat.search(full_text)]
-    if len(matched_skills) < 2:
+    if len(matched_skills) < 2 and not is_uw:
         # A single keyword hit is too weak a signal on its own (e.g. an
         # accounting internship mentioning "Excel", or boilerplate template
         # text a company reuses across unrelated fellowship tracks) —
         # require at least 2 real overlaps before treating it as a fit.
+        # UW is exempted: its one-sentence descriptions rarely hit 2 real
+        # keyword matches at all, so this gate would zero out nearly every
+        # UW posting regardless of genuine relevance. UW postings get a
+        # pass here and are always written to the sheet (see
+        # MIN_SCORE_TO_INCLUDE handling in _append_row) so Giri can see the
+        # real score and judge fit himself rather than seeing nothing.
         return 0, ["filtered: insufficient technical skill overlap"]
-    skill_score = min(35, len(matched_skills) * 3)
-    score += skill_score
-    reasons.append(f"Skills: {', '.join(matched_skills[:6])}")
+    if matched_skills:
+        skill_score = min(35, len(matched_skills) * 3)
+        score += skill_score
+        reasons.append(f"Skills: {', '.join(matched_skills[:6])}")
 
     # ── Title / role fit (0-25) ───────────────────────────────────────────
     if re.search(r"\bintern(ship)?s?\b", title):
@@ -1044,7 +1059,13 @@ def _write_header(ws):
 
 def _append_row(ws, job: dict) -> int | None:
     score, reasons = score_job(job)
-    if score < MIN_SCORE_TO_INCLUDE:
+    # UW gets a pass on the score floor too (small, valuable, low-signal
+    # source by nature — see score_job's is_uw handling) — always written
+    # so Giri can see the real percentage and judge fit himself, as long as
+    # it wasn't hard-excluded outright (seniority/grad-degree/domain/US-only
+    # all still return 0 with a "filtered: ..." reason, which stays dropped).
+    is_uw = job["id"].startswith("uw:")
+    if score < MIN_SCORE_TO_INCLUDE and not (is_uw and not reasons[0].startswith("filtered:")):
         return None  # not a strong enough fit — don't clutter the sheet
 
     row = ws.max_row + 1
