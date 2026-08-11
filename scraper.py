@@ -720,6 +720,241 @@ def fetch_uw() -> list[dict]:
     return jobs
 
 
+# ── Named-company direct sources: Starbucks + American Express ────────────
+# Giri asked specifically to be notified when these two post. Neither uses
+# Greenhouse/Lever/Ashby, so they can't go in COMPANIES/FETCHERS as-is - and
+# titles like "Software Engineer I" don't self-label "new grad"/"intern" the
+# way the COMPANIES loop's INTERNSHIP_TITLE_RE requirement expects, so
+# these are integrated the same way as YC/UW (no title-regex requirement at
+# fetch time; SENIORITY_AVOID_RE/GRAD_DEGREE_AVOID_RE/domain/recency/
+# underclassman all still apply in score_job() same as everywhere else).
+#
+# Both use a 2-tier API: a cheap search/list endpoint (title + location +
+# date, no description) and a details endpoint (real description) called
+# per candidate - it's what a details call costs that _cheap_title_survives()
+# exists to avoid paying for on obviously-disqualified titles.
+BIG_COMPANY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+}
+
+
+def _get_with_retry(url: str, **kwargs) -> requests.Response:
+    """GET with retry-after-backoff on 429/5xx. The per-job details calls on
+    these two sources are frequent enough in a burst (dozens back to back,
+    ~0.2-0.5s apart) to trip basic rate limiting - seen directly against
+    Starbucks' position_details endpoint during testing, even with one retry."""
+    for delay in (3, 6, None):
+        r = requests.get(url, timeout=20, **kwargs)
+        if (r.status_code == 429 or r.status_code >= 500) and delay is not None:
+            time.sleep(delay)
+            continue
+        r.raise_for_status()
+        return r
+
+
+def _cheap_title_survives(title: str) -> bool:
+    """Pre-filter for 2-tier sources, applied before paying for a per-job
+    details call. Not a substitute for score_job()'s real hard filters
+    (which still run once description text is available) - just avoids
+    fetching details for titles that would obviously fail anyway."""
+    if SENIORITY_AVOID_RE.search(title) and not INTERNSHIP_TITLE_RE.search(title):
+        return False
+    if GRAD_DEGREE_AVOID_RE.search(title):
+        return False
+    if NON_TECHNICAL_ROLE_RE.search(title):
+        return False
+    return True
+
+
+# Starbucks runs on Phenom People's "pcsx" career-site platform.
+# apply.starbucks.com/robots.txt was checked directly and explicitly
+# ALLOWS /api/pcsx (unlike Skillsire's disallow on /api/ - no conflict here).
+STARBUCKS_COMPANY = {
+    "name": "Starbucks", "token": "starbucks.com",
+    "startup": False, "website": "https://www.starbucks.com",
+}
+STARBUCKS_QUERIES = [
+    "Software Engineer", "Software Development Engineer",
+    "Data Engineer", "Machine Learning Engineer",
+]
+
+
+def fetch_starbucks(company: dict) -> list[dict]:
+    domain = company["token"]
+    jobs, seen_ids = [], set()
+
+    for query in STARBUCKS_QUERIES:
+        start = 0
+        while True:
+            try:
+                r = _get_with_retry(
+                    "https://apply.starbucks.com/api/pcsx/search",
+                    params={"domain": domain, "query": query, "start": start},
+                    headers=BIG_COMPANY_HEADERS,
+                )
+                positions = r.json().get("data", {}).get("positions", [])
+            except Exception as e:
+                print(f"Starbucks search {query!r} @{start} FAILED: {e}")
+                break
+            if not positions:
+                break
+            for p in positions:
+                pid, title = p.get("id"), p.get("name", "")
+                std_locs = p.get("standardizedLocations") or []
+                is_us = any(loc == "US" or loc.endswith(", US") for loc in std_locs)
+                # Starbucks' search is fuzzy/broad (a huge, mostly-retail job
+                # index) — a "Software Engineer" query surfaced a French-
+                # language Canadian store-manager posting during testing.
+                # Neither the English-only seniority regex nor
+                # NON_US_LOCATION_RE (missing many Canadian provinces) would
+                # have caught that reliably, so check the real structured
+                # location data directly instead of trusting title regex.
+                if not pid or pid in seen_ids or not _cheap_title_survives(title) or not is_us:
+                    continue
+                seen_ids.add(pid)
+                jobs.append({
+                    "id": f"starbucks:{pid}",
+                    "title": title,
+                    "companyName": company["name"],
+                    "isStartup": company["startup"],
+                    "website": company["website"],
+                    "location": "; ".join(p.get("standardizedLocations") or p.get("locations") or []),
+                    "descriptionText": "",
+                    "link": f"https://apply.starbucks.com{p['positionUrl']}" if p.get("positionUrl") else "",
+                    "postedAt": (
+                        datetime.fromtimestamp(p["postedTs"], tz=timezone.utc).isoformat()
+                        if p.get("postedTs") else ""
+                    ),
+                    "_detail_id": pid,
+                })
+            start += len(positions)
+            if start > 200:  # safety cap - Starbucks' SWE-flavored postings are a small subset of its total job count
+                break
+            time.sleep(0.2)
+
+    for j in jobs:
+        pid = j.pop("_detail_id")
+        try:
+            r = _get_with_retry(
+                "https://apply.starbucks.com/api/pcsx/position_details",
+                params={"position_id": pid, "domain": domain, "hl": "en"},
+                headers=BIG_COMPANY_HEADERS,
+            )
+            j["descriptionText"] = strip_html(r.json().get("data", {}).get("jobDescription") or "")
+        except Exception as e:
+            print(f"Starbucks details {pid} FAILED: {e}")
+        time.sleep(0.4)
+    return jobs
+
+
+# Oracle Fusion Recruiting Cloud - American Express's platform, also used by
+# many other large enterprises. Neither careers.americanexpress.com nor the
+# underlying Oracle Cloud host (egug.fa.us2.oraclecloud.com) publish a
+# robots.txt at all (checked directly - both 404), so there's no explicit
+# disallow to weigh, unlike Skillsire. Config carries base_url + site_number
+# per company (both visible in a careers page's HTML as data-apibaseurl /
+# data-sitenumber) and careers_base for building real apply links, so more
+# Oracle-ORC companies can be added later without new fetch logic.
+ORACLE_ORC_QUERIES = ["Software Engineer", "Software Development Engineer", "Data Engineer", "Data Scientist"]
+
+ORACLE_ORC_COMPANIES = [
+    {
+        "name": "American Express", "token": "amex",
+        "base_url": "https://egug.fa.us2.oraclecloud.com:443",
+        "site_number": "CX_1",
+        "careers_base": "https://careers.americanexpress.com",
+        "startup": False, "website": "https://www.americanexpress.com",
+    },
+]
+
+
+def _oracle_date_to_iso(date_str: str) -> str:
+    # The list endpoint gives a date-only string ("2026-08-10"), which
+    # datetime.fromisoformat() parses as naive (no tzinfo) - score_job()
+    # then compares it against an aware datetime.now(timezone.utc) and
+    # raises TypeError. Force UTC midnight so it round-trips safely.
+    if not date_str:
+        return ""
+    return date_str if "T" in date_str else f"{date_str}T00:00:00+00:00"
+
+
+def fetch_oracle_orc(company: dict) -> list[dict]:
+    base_url, site_number = company["base_url"], company["site_number"]
+    jobs, seen_ids = [], set()
+
+    for query in ORACLE_ORC_QUERIES:
+        offset = 0
+        while True:
+            finder = (
+                f"findReqs;siteNumber={site_number},"
+                f"facetsList=LOCATIONS;WORK_LOCATIONS;WORKPLACE_TYPES;TITLES;CATEGORIES;ORGANIZATIONS;POSTING_DATES;FLEX_FIELDS,"
+                f"limit=25,offset={offset},sortBy=POSTING_DATES_DESC,keyword={query}"
+            )
+            try:
+                r = _get_with_retry(
+                    f"{base_url}/hcmRestApi/resources/latest/recruitingCEJobRequisitions",
+                    params={
+                        "onlyData": "true", "finder": finder,
+                        # Without `expand`, the response omits requisitionList
+                        # entirely (only facet aggregations come back) - found
+                        # by testing, not documented anywhere obvious.
+                        "expand": "requisitionList.secondaryLocations,requisitionList.workLocation",
+                    },
+                    headers=BIG_COMPANY_HEADERS,
+                )
+                reqs = r.json()["items"][0].get("requisitionList", [])
+            except Exception as e:
+                print(f"{company['name']} search {query!r} @{offset} FAILED: {e}")
+                break
+            if not reqs:
+                break
+            for req in reqs:
+                rid, title = req.get("Id"), req.get("Title", "")
+                country = req.get("PrimaryLocationCountry") or ""
+                if not rid or rid in seen_ids or not _cheap_title_survives(title):
+                    continue
+                if country and country != "US":
+                    continue  # cheap pre-filter before paying for a details call
+                seen_ids.add(rid)
+                jobs.append({
+                    "id": f"oracle_orc:{company['token']}:{rid}",
+                    "title": title,
+                    "companyName": company["name"],
+                    "isStartup": company["startup"],
+                    "website": company["website"],
+                    "location": req.get("PrimaryLocation", "") or "",
+                    "descriptionText": "",
+                    "link": f"{company['careers_base']}/en/sites/{site_number}/job/{rid}",
+                    "postedAt": _oracle_date_to_iso(req.get("PostedDate")),
+                    "_detail_id": rid,
+                })
+            offset += len(reqs)
+            if offset > 200:  # safety cap
+                break
+            time.sleep(0.2)
+
+    for j in jobs:
+        rid = j.pop("_detail_id")
+        try:
+            r = _get_with_retry(
+                f"{base_url}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails",
+                params={"finder": f'ById;Id="{rid}",siteNumber={site_number}', "onlyData": "true"},
+                headers=BIG_COMPANY_HEADERS,
+            )
+            detail = r.json()["items"][0]
+            desc = " ".join(filter(None, [
+                detail.get("ExternalDescriptionStr"),
+                detail.get("ExternalQualificationsStr"),
+                detail.get("ExternalResponsibilitiesStr"),
+            ]))
+            j["descriptionText"] = strip_html(desc)
+        except Exception as e:
+            print(f"{company['name']} details {rid} FAILED: {e}")
+        time.sleep(0.4)
+    return jobs
+
+
 def scrape_jobs() -> list[dict]:
     all_jobs = []
     for company in COMPANIES:
@@ -785,8 +1020,42 @@ def scrape_jobs() -> list[dict]:
         print(f"{'UW Career Center':28s} ({'uw':10s}): "
               f"{len(uw_jobs):4d} total, {len(qualifying_jobs):3d} undergrad-eligible")
         all_jobs.extend(qualifying_jobs)
+        seen_pairs.update((j["companyName"].lower(), j["title"].lower()) for j in qualifying_jobs)
     except Exception as e:
         print(f"{'UW Career Center':28s} ({'uw':10s}): FAILED — {e}")
+
+    # Starbucks + American Express — same reasoning as YC/UW (title doesn't
+    # self-label "new grad"/"intern"); _cheap_title_survives() already ran
+    # inside the fetcher before any details call, so this is just the
+    # cross-source dedup + non-technical-role check every other block does.
+    try:
+        starbucks_jobs = fetch_starbucks(STARBUCKS_COMPANY)
+        qualifying_jobs = [
+            j for j in starbucks_jobs
+            if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
+        ]
+        print(f"{'Starbucks':28s} ({'starbucks':10s}): "
+              f"{len(starbucks_jobs):4d} total, {len(qualifying_jobs):3d} undergrad-eligible")
+        all_jobs.extend(qualifying_jobs)
+        seen_pairs.update((j["companyName"].lower(), j["title"].lower()) for j in qualifying_jobs)
+    except Exception as e:
+        print(f"{'Starbucks':28s} ({'starbucks':10s}): FAILED — {e}")
+
+    for oracle_company in ORACLE_ORC_COMPANIES:
+        try:
+            oracle_jobs = fetch_oracle_orc(oracle_company)
+            qualifying_jobs = [
+                j for j in oracle_jobs
+                if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+                and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
+            ]
+            print(f"{oracle_company['name']:28s} ({'oracle_orc':10s}): "
+                  f"{len(oracle_jobs):4d} total, {len(qualifying_jobs):3d} undergrad-eligible")
+            all_jobs.extend(qualifying_jobs)
+            seen_pairs.update((j["companyName"].lower(), j["title"].lower()) for j in qualifying_jobs)
+        except Exception as e:
+            print(f"{oracle_company['name']:28s} ({'oracle_orc':10s}): FAILED — {e}")
 
     return all_jobs
 
