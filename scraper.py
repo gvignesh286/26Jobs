@@ -478,7 +478,16 @@ NON_TECHNICAL_ROLE_RE = re.compile(
     r"marketing|content (writer|strategist)|copywriter|"
     r"finance|financial|accounting|accountant|payroll|legal|privacy|compliance|"
     r"audit|procurement|supply chain|customer (success|support)|workday|"
-    r"medical|clinical)\b"
+    r"medical|clinical|"
+    # Clinical/lab provider & scientist titles - a title-level backstop for
+    # when roleType-based exclusion (see YC_EXCLUDED_ROLE_TYPES) isn't
+    # available or reliable. Found via real postings that slipped through:
+    # "Licensed Mental Health Providers", "Psychiatric Nurse Practitioner
+    # (PMHNP)", "Formulation Scientist", "Telemedicine Specialist".
+    r"nurse practitioner|physician|pharmacist|\bpharmacy\b|dietitian|"
+    r"psychiatric|mental health provider|licensed (clinical|therapist)|"
+    r"telemedicine specialist|formulation scientist|"
+    r"clinical (researcher|lead)|diagnostics clinical)\b"
 )
 
 # Hard title exclusions, split into two categories that get treated
@@ -832,6 +841,66 @@ YC_ROLE_TYPE_TEXT = {
     "Product": "product management roadmap stakeholder data analytics business analyst",
 }
 
+# roleType values that are explicitly non-technical/wrong-domain for a CS
+# candidate. Found via a real bug: the "/science" category page returns
+# wet-lab/clinical roles too (Formulation Scientist -> roleType
+# "Biotechnology", Licensed Mental Health Providers / Psychiatric Nurse
+# Practitioner -> roleType "Healthcare") - none of those are in
+# YC_ROLE_TYPE_TEXT, so they fell through to the URL-level "machine
+# learning artificial intelligence data science research python" fallback
+# meant for postings with NO roleType at all, not ones that explicitly say
+# otherwise. That fake description then passed the skill-match gate and
+# scored 60% in production. Excluded outright here rather than trusting
+# downstream filters, since the fake description was defeating them.
+YC_EXCLUDED_ROLE_TYPES = {
+    "Healthcare", "Biotechnology", "Biology", "Chemistry", "Immunology",
+    "Oncology", "Laboratory",
+}
+
+# YC's location field is a flat string, not structured data - checked
+# separately from NON_US_LOCATION_RE (built for spelled-out city/country
+# names) because YC formats non-US locations with 2-3 letter codes instead
+# ("Gurugram, HR, IN / Remote (IN)"), which that regex doesn't catch. Also
+# a real bug found in production: PROFILE["preferred_locations"] contains
+# "remote", matched as a bare substring - "Remote (IN)" contains "remote"
+# and was scoring +20 location points as if it were US-remote.
+US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC", "PR",
+}
+
+
+def _yc_location_is_non_us(location: str) -> bool:
+    loc = (location or "").strip()
+    if not loc:
+        return False
+    # "... / Remote (IN)" - explicit non-US remote marker.
+    m = re.search(r"remote\s*\(([a-z]{2,3})\)", loc.lower())
+    if m and m.group(1).upper() not in ("US", "USA"):
+        return True
+    primary = loc.split("/")[0].strip()
+    parts = [p.strip() for p in primary.split(",")]
+    if len(parts) >= 3:
+        # YC's 3-part format is "City, State/Region, CountryCode". For
+        # genuine US postings the country segment is literally "US"/"USA"
+        # (e.g. "San Francisco, CA, US"), never a repeated/different state
+        # code - checking the last segment against the state-code
+        # whitelist would wrongly accept "Bengaluru, KA, IN" since IN is
+        # *also* Indiana's code. A real gap found in production: this
+        # exact string slipped past an earlier version of this check that
+        # did use the whitelist here.
+        if parts[-1].upper() not in ("US", "USA"):
+            return True
+    elif len(parts) == 2:
+        # 2-part "City, XX" where XX isn't a real US state code at all.
+        last = parts[-1]
+        if re.fullmatch(r"[A-Za-z]{2,3}", last) and last.upper() not in US_STATE_CODES:
+            return True
+    return False
+
 
 def fetch_yc() -> list[dict]:
     known_websites = {c["name"].lower(): c["website"] for c in COMPANIES}
@@ -851,9 +920,14 @@ def fetch_yc() -> list[dict]:
                 seen_ids.add(j["id"])
                 key = (j.get("companyName") or "").lower()
                 one_liner = j.get("companyOneLiner", "") or ""
-                if key in DEFENSE_COMPANY_BLOCKLIST or DOMAIN_EXCLUDE_RE.search(one_liner):
+                role_type = j.get("roleType") or ""
+                location = j.get("location", "")
+                if (key in DEFENSE_COMPANY_BLOCKLIST
+                        or DOMAIN_EXCLUDE_RE.search(one_liner)
+                        or role_type in YC_EXCLUDED_ROLE_TYPES
+                        or _yc_location_is_non_us(location)):
                     continue
-                role_text = YC_ROLE_TYPE_TEXT.get(j.get("roleType") or "", "") or category_text
+                role_text = YC_ROLE_TYPE_TEXT.get(role_type, "") or category_text
                 jobs.append({
                     "id": f"yc:{j['id']}",
                     "title": j.get("title", ""),
@@ -863,7 +937,7 @@ def fetch_yc() -> list[dict]:
                         f"https://www.workatastartup.com/companies/{j['companySlug']}"
                         if j.get("companySlug") else ""
                     ),
-                    "location": j.get("location", ""),
+                    "location": location,
                     "descriptionText": f"{role_text} {j.get('companyOneLiner', '')}",
                     "link": j.get("applyUrl", ""),
                     "postedAt": "",
@@ -1386,8 +1460,16 @@ def score_job(job: dict) -> tuple[int, list[str]]:
         reasons.append("YC full-time (undergrad-eligible)")
 
     # ── Location (0-20) ───────────────────────────────────────────────────
+    # "remote" matching as a bare substring means "Remote (IN)"/"Remote (UK)"
+    # would score as if they were US-remote — a real bug found via a YC
+    # posting (Gurugram, India) scoring 60% partly off this. Guard against
+    # "remote (XX)" with a non-US code before granting the bonus; not
+    # YC-specific — this loop runs for every source's location string.
+    non_us_remote = re.search(r"remote\s*\(([a-z]{2,3})\)", location)
     for loc in PROFILE["preferred_locations"]:
         if loc in location:
+            if loc == "remote" and non_us_remote and non_us_remote.group(1) not in ("us", "usa"):
+                continue
             score += 20
             reasons.append(f"Location: {job.get('location')}")
             break
