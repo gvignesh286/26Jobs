@@ -281,7 +281,7 @@ NON_TECHNICAL_ROLE_RE = re.compile(
 # executive titles common on the YC source (small startups often hire
 # "Founding Engineer"/CTO as an experienced-only role).
 SENIORITY_AVOID_RE = re.compile(
-    r"(?i)\b(senior|staff|principal|director|manager|lead|"
+    r"(?i)\b(senior|sr\.?|staff|principal|director|manager|lead|"
     r"founding|chief technology officer|\bcto\b|head of|"
     r"postdoc(toral)?|research scientist)\b"
 )
@@ -328,6 +328,51 @@ NON_US_LOCATION_RE = re.compile(
     r"philippines|manila|vietnam|indonesia|jakarta|malaysia|"
     r"south africa|new zealand|austria|vienna|belgium|brussels)\b"
 )
+
+# Underclassman eligibility signals. Giri is now a graduating senior (grad
+# May 2027) targeting New Grad roles — an internship explicitly gated to
+# students with 2+ years of school left (freshmen/sophomores/juniors) isn't
+# a fit even if it otherwise looks like a strong internship match. Checked
+# against description text (this eligibility language is essentially never
+# in the title itself). Internships open to Giri's own class, or with no
+# class-year restriction stated, are NOT caught by this — only explicit
+# underclassman-targeting language is.
+UNDERCLASSMAN_ELIGIBILITY_RE = re.compile(
+    r"(?i)\b(rising sophomores?|rising juniors?|rising seniors?|freshm(a|e)n|"
+    r"first-year students?|second-year students?|third-year students?|"
+    r"sophomore year|penultimate year|"
+    r"at least one more (year|semester) (of school|remaining)|"
+    r"must (have|complete) (at least )?one more year|"
+    r"not (in your|graduating in your) final year)\b"
+)
+
+# "Class of 20XX" eligibility requirements naming a grad year later than
+# Giri's own (see CONTACT["grad"]) also signal the posting wants someone
+# with more school left. Extracted and compared numerically against
+# GRAD_YEAR rather than hardcoding specific years, so this doesn't quietly
+# go stale as time passes.
+CLASS_OF_YEAR_RE = re.compile(r"(?i)\bclass of (20\d{2})\b")
+GRAD_YEAR = int(re.search(r"\d{4}", CONTACT["grad"]).group())
+
+
+def targets_underclassman(text: str) -> str | None:
+    """Returns the matched phrase if `text` targets a student with more
+    than one year of school left after Giri's own graduation, else None."""
+    hit = UNDERCLASSMAN_ELIGIBILITY_RE.search(text)
+    if hit:
+        return hit.group(0)
+    for m in CLASS_OF_YEAR_RE.finditer(text):
+        if int(m.group(1)) > GRAD_YEAR:
+            return m.group(0)
+    return None
+
+
+# Hard cutoff — a posting older than this is dropped entirely, not just
+# down-scored. Only applies where a real date is known (see score_job()) —
+# sources with no postedAt (YC, UW) can't be proven stale, so they aren't
+# dropped by this; same reasoning as everywhere else a signal is missing
+# rather than negative.
+MAX_POSTING_AGE_DAYS = 7
 
 MIN_SCORE_TO_INCLUDE = 55  # below this, a posting is dropped entirely (not just low-ranked) — uniform across every source, no exceptions
 
@@ -754,7 +799,9 @@ def score_job(job: dict) -> tuple[int, list[str]]:
       - Skill keyword match   : 0-35 pts
       - Title / role fit      : 0-25 pts
       - Location preference   : 0-20 pts
-      - Recency                : 0-20 pts
+      - Recency                : 0-20 pts (postings older than
+        MAX_POSTING_AGE_DAYS are hard-filtered before scoring, not just
+        down-scored)
       - Negative signals       : subtracted, floor 0
     """
     title = (job.get("title") or "").lower()
@@ -789,6 +836,29 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     if non_us_hit:
         return 0, [f"filtered: '{non_us_hit.group(0)}' (non-US location)"]
 
+    # ── Underclassman eligibility — never overridable, same treatment as
+    # GRAD_DEGREE_AVOID_RE (an internship self-labeled as open to anyone can
+    # still explicitly require 2+ years of school left in the description).
+    underclass_hit = targets_underclassman(full_text)
+    if underclass_hit:
+        return 0, [f"filtered: targets underclassmen ('{underclass_hit}')"]
+
+    # ── Recency — hard cutoff, checked here (not just scored below) so a
+    # stale posting is dropped outright regardless of how well it otherwise
+    # scores. Sources with no postedAt (YC, UW) can't be proven stale, so
+    # days_old stays None for them and this doesn't drop anything — see
+    # MAX_POSTING_AGE_DAYS' docstring.
+    posted_at = job.get("postedAt")
+    days_old = None
+    if posted_at:
+        try:
+            posted_dt = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
+            days_old = (datetime.now(timezone.utc) - posted_dt).days
+        except Exception:
+            days_old = None
+    if days_old is not None and days_old > MAX_POSTING_AGE_DAYS:
+        return 0, [f"filtered: posted {days_old}d ago (> {MAX_POSTING_AGE_DAYS}d limit)"]
+
     reasons = []
     score = 0
 
@@ -812,18 +882,21 @@ def score_job(job: dict) -> tuple[int, list[str]]:
         reasons.append(f"Skills: {', '.join(matched_skills[:6])}")
 
     # ── Title / role fit (0-25) ───────────────────────────────────────────
+    # New Grad now scores equal to Internship (was 12 vs 25) — Giri's a
+    # graduating senior targeting entry-level full-time roles, not chasing
+    # internships as the primary goal anymore.
     if re.search(r"\bintern(ship)?s?\b", title):
         score += 25
         reasons.append("Internship title")
+    elif re.search(r"new grad|university grad|early career", title):
+        score += 25
+        reasons.append("New-grad title")
     elif re.search(r"fellow(ship)?s?", title):
         score += 23
         reasons.append("Fellowship title")
     elif re.search(r"co-?op", title):
         score += 20
         reasons.append("Co-op title")
-    elif re.search(r"new grad|university grad|early career", title):
-        score += 12
-        reasons.append("New-grad title")
     elif job["id"].startswith("yc:"):
         # YC full-time postings rarely say "new grad" explicitly even when
         # they're accessible — SENIORITY_AVOID_RE already screened out
@@ -841,22 +914,18 @@ def score_job(job: dict) -> tuple[int, list[str]]:
             break
 
     # ── Recency (0-20) ────────────────────────────────────────────────────
-    posted_at = job.get("postedAt")
-    if posted_at:
-        try:
-            posted_dt = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
-            days_old = (datetime.now(timezone.utc) - posted_dt).days
-            if days_old <= 7:
-                score += 20
-                reasons.append("Posted <7d ago")
-            elif days_old <= 14:
-                score += 14
-            elif days_old <= 30:
-                score += 8
-            else:
-                score += 2
-        except Exception:
-            pass
+    # Everything reaching this point already survived the MAX_POSTING_AGE_DAYS
+    # hard cutoff above, so this just rewards "very fresh" over "within the
+    # week" rather than gating on age at all.
+    if days_old is not None:
+        if days_old <= 2:
+            score += 20
+            reasons.append("Posted <=2d ago")
+        else:
+            score += 14
+            reasons.append(f"Posted {days_old}d ago")
+    else:
+        score += 8  # unknown age (YC/UW) — neutral, can't verify freshness
 
     # ── Negative signals ──────────────────────────────────────────────────
     penalties = [bad for bad, pat in AVOID_PATTERNS if pat.search(full_text)]
