@@ -11,7 +11,7 @@ import re
 import json
 import time
 import html
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 import requests
 import openpyxl
@@ -527,10 +527,20 @@ GRAD_DEGREE_AVOID_RE = re.compile(
 # fit regardless of skill overlap.
 DOMAIN_EXCLUDE_RE = re.compile(
     r"(?i)\b(cybersecurity|cyber security|security engineer|security analyst|"
-    r"infosec|information security|penetration test(ing|er)?|red team|"
+    r"infosec|penetration test(ing|er)?|red team|"
     r"blue team|soc analyst|application security|"
     r"aerospace|avionics|satellite|spacecraft|propulsion|flight software|aircraft)\b"
 )
+# "information security" was in this list as a bare phrase and got dropped —
+# checked against full title+description text, it's a real false positive:
+# a Starbucks "Software Engineer, Cloud Foundation Services" posting was
+# excluded purely for a bullet point reading "Implement technologies
+# following Information Security principles for sensitive data," which is
+# routine compliance boilerplate in most modern SWE job descriptions, not a
+# signal the role is a dedicated security position. The other terms here
+# (security engineer/analyst, infosec, penetration testing, red/blue team,
+# soc analyst) are specific enough to actual security ROLES that they don't
+# have the same false-positive risk when found in body text.
 
 # US-only — checked against the location field. Blocklist approach (rather
 # than a US-city whitelist) since ATS location strings are free-text and a
@@ -1344,6 +1354,26 @@ def scrape_jobs() -> list[dict]:
     return all_jobs
 
 
+# Companies *confirmed* big/public — not just "isStartup defaulted to
+# False because we don't know" — exempted from the recency hard cutoff
+# below. Real pattern found in production: 43% of sampled big-company
+# internship postings were killed purely by MAX_POSTING_AGE_DAYS, not
+# skill/seniority/domain mismatch. These companies tend to post one
+# internship listing early in a cycle and leave it open for months while
+# actively recruiting through it, so the ATS's "created" timestamp
+# reflects when the listing was first made, not whether it's still live.
+# Deliberately built from the curated lists' explicit `startup: False`
+# tag, not from a job's own `isStartup` field — Simplify-sourced companies
+# also default isStartup=False when unrecognized, and keying off that
+# field directly would exempt that entire ~800-posting aggregator batch
+# instead of just the companies actually confirmed big/public.
+CONFIRMED_BIG_COMPANIES = (
+    {c["name"] for c in COMPANIES if c["startup"] is False}
+    | {c["name"] for c in ORACLE_ORC_COMPANIES if c["startup"] is False}
+    | ({STARBUCKS_COMPANY["name"]} if STARBUCKS_COMPANY["startup"] is False else set())
+)
+
+
 # ── Scoring ────────────────────────────────────────────────────────────────
 def score_job(job: dict) -> tuple[int, list[str]]:
     """
@@ -1400,7 +1430,11 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     # stale posting is dropped outright regardless of how well it otherwise
     # scores. Sources with no postedAt (YC, UW) can't be proven stale, so
     # days_old stays None for them and this doesn't drop anything — see
-    # MAX_POSTING_AGE_DAYS' docstring.
+    # MAX_POSTING_AGE_DAYS' docstring. Confirmed big/public companies (see
+    # CONFIRMED_BIG_COMPANIES) are exempt from the cutoff itself, though
+    # days_old is still computed and still used for scoring below — an
+    # evergreen internship listing open for months is still a real
+    # opportunity, the ATS "created" timestamp just doesn't track that.
     posted_at = job.get("postedAt")
     days_old = None
     if posted_at:
@@ -1409,7 +1443,8 @@ def score_job(job: dict) -> tuple[int, list[str]]:
             days_old = (datetime.now(timezone.utc) - posted_dt).days
         except Exception:
             days_old = None
-    if days_old is not None and days_old > MAX_POSTING_AGE_DAYS:
+    is_confirmed_big_company = job.get("companyName") in CONFIRMED_BIG_COMPANIES
+    if days_old is not None and days_old > MAX_POSTING_AGE_DAYS and not is_confirmed_big_company:
         return 0, [f"filtered: posted {days_old}d ago (> {MAX_POSTING_AGE_DAYS}d limit)"]
 
     reasons = []
@@ -1529,21 +1564,38 @@ def is_internship_type(title: str) -> bool:
     return bool(JOB_TYPE_TITLE_RE.search(title))
 
 
-def load_existing_ids(path: str) -> set:
-    if not os.path.exists(path):
-        return set()
-    try:
-        wb = openpyxl.load_workbook(path)
-        ids = set()
-        for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME):
-            if name in wb.sheetnames:
-                ids.update(str(row[0]) for row in wb[name].iter_rows(min_row=2, values_only=True) if row[0])
-        if not ids and wb.sheetnames:
-            # Backward compat with the old single-sheet layout
-            ids.update(str(row[0]) for row in wb.active.iter_rows(min_row=2, values_only=True) if row[0])
-        return ids
-    except Exception:
-        return set()
+# Rows are appended forever otherwise — MAX_POSTING_AGE_DAYS (7) only stops
+# a *stale* posting from being added in the first place, it doesn't remove
+# rows already in the sheet as they age past relevance. This is a second,
+# separate cutoff: how long a row stays in jobs.xlsx at all once it's there,
+# regardless of how fresh it looked on the day it was added.
+MAX_ROW_AGE_DAYS = 30
+
+
+def purge_stale_rows(wb) -> int:
+    """Removes rows whose 'Date Found' (column B) is more than
+    MAX_ROW_AGE_DAYS old, from every sheet. Mutates `wb` in place. Returns
+    the number of rows removed, for logging."""
+    cutoff = datetime.today() - timedelta(days=MAX_ROW_AGE_DAYS)
+    removed = 0
+    for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME, STARTUP_SHEET_NAME):
+        if name not in wb.sheetnames:
+            continue
+        ws = wb[name]
+        # Bottom-up so deleting a row never shifts the index of a row not
+        # yet visited.
+        for row_idx in range(ws.max_row, 1, -1):
+            date_found = ws.cell(row=row_idx, column=2).value
+            if not date_found:
+                continue
+            try:
+                found_dt = datetime.strptime(str(date_found), "%Y-%m-%d")
+            except ValueError:
+                continue
+            if found_dt < cutoff:
+                ws.delete_rows(row_idx)
+                removed += 1
+    return removed
 
 
 # ── Outreach drafts ────────────────────────────────────────────────────────
@@ -1630,7 +1682,6 @@ def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
     Discord notification so it only reports what's genuinely new today.
     Routes each job to Internships or Jobs by title; Startups is a
     same-day mirror of both, filtered further by startup tag + region."""
-    existing_ids = load_existing_ids(path)
     added = []
 
     if os.path.exists(path):
@@ -1649,6 +1700,20 @@ def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
     ws_internships, ws_jobs, ws_startup = (
         sheets[INTERNSHIPS_SHEET_NAME], sheets[JOBS_SHEET_NAME], sheets[STARTUP_SHEET_NAME]
     )
+
+    purged = purge_stale_rows(wb)
+    if purged:
+        print(f"Purged {purged} posting(s) older than {MAX_ROW_AGE_DAYS} days from the sheet.")
+
+    # Computed fresh from the now-purged workbook, not from a disk read
+    # done before the purge — that would still treat a just-purged
+    # posting's old ID as "seen" and silently block it from ever being
+    # re-added, even if it's genuinely still open and gets rediscovered.
+    existing_ids = {
+        str(row[0])
+        for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME)
+        for row in wb[name].iter_rows(min_row=2, values_only=True) if row[0]
+    }
 
     startup_count = 0
     for job in jobs_scored:
