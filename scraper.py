@@ -245,6 +245,216 @@ COMPANIES = [
     {"name": "AlertMedia", "platform": "greenhouse", "token": "alertmedia", "startup": True, "website": "https://www.alertmedia.com"},
     {"name": "Convey", "platform": "ashby", "token": "convey", "startup": True, "website": "https://www.convey.com"},
     {"name": "Shipwell", "platform": "greenhouse", "token": "shipwell", "startup": True, "website": "https://www.shipwell.com"},
+
+    # ── Added: 100+ company expansion across CS-adjacent sectors ──
+    # (fintech, healthtech, insurtech, AI/ML, cybersecurity, dev tools,
+    # gaming, logistics, climate tech, consumer, edtech, quant trading,
+    # crypto, biotech, autonomous vehicles, legal tech, business/productivity
+    # SaaS) — each token verified against the live Greenhouse/Lever/Ashby
+    # API before being added; a handful of generic-word token guesses that
+    # resolved to a DIFFERENT real company of the same name were caught by
+    # sampling actual job titles/locations and excluded.
+
+    # ── AI / ML ──
+    {"name": "ElevenLabs", "platform": "ashby", "token": "elevenlabs", "startup": True, "website": "https://elevenlabs.io"},
+    {"name": "Glean", "platform": "greenhouse", "token": "gleanwork", "startup": True, "website": "https://www.glean.com"},
+    {"name": "Inflection AI", "platform": "greenhouse", "token": "inflectionai", "startup": True, "website": "https://inflection.ai"},
+    {"name": "Mistral AI", "platform": "lever", "token": "mistral", "startup": True, "website": "https://mistral.ai"},
+    {"name": "Speak", "platform": "ashby", "token": "speak", "startup": True, "website": "https://www.speak.com"},
+    {"name": "Synthesia", "platform": "ashby", "token": "synthesia", "startup": True, "website": "https://www.synthesia.io"},
+    {"name": "World Labs", "platform": "greenhouse", "token": "worldlabs", "startup": True, "website": "https://www.worldlabs.ai"},
+    {"name": "Writer", "platform": "ashby", "token": "writer", "startup": True, "website": "https://writer.com"},
+
+    # ── Autonomous vehicles ──
+    {"name": "Lucid Motors", "platform": "greenhouse", "token": "lucidmotors", "startup": False, "website": "https://www.lucidmotors.com"},
+    {"name": "Waymo", "platform": "greenhouse", "token": "waymo", "startup": False, "website": "https://waymo.com"},
+    {"name": "Zoox", "platform": "lever", "token": "zoox", "startup": False, "website": "https://zoox.com"},
+
+    # ── Biotech / life sciences ──
+    {"name": "Benchling", "platform": "ashby", "token": "benchling", "startup": True, "website": "https://www.benchling.com"},
+    {"name": "Freenome", "platform": "greenhouse", "token": "freenome", "startup": True, "website": "https://www.freenome.com"},
+    {"name": "Ginkgo Bioworks", "platform": "greenhouse", "token": "ginkgobioworks", "startup": False, "website": "https://www.ginkgobioworks.com"},
+    {"name": "Grail", "platform": "lever", "token": "grailbio", "startup": False, "website": "https://grail.com"},
+    {"name": "Insitro", "platform": "ashby", "token": "insitro", "startup": True, "website": "https://www.insitro.com"},
+
+    # ── Business / productivity SaaS ──
+    {"name": "AngelList", "platform": "lever", "token": "angellist", "startup": True, "website": "https://www.angellist.com"},
+    {"name": "ClickUp", "platform": "ashby", "token": "clickup", "startup": True, "website": "https://clickup.com"},
+    {"name": "Deel", "platform": "ashby", "token": "deel", "startup": True, "website": "https://www.deel.com"},
+    {"name": "Freshworks", "platform": "lever", "token": "freshworks", "startup": False, "website": "https://www.freshworks.com"},
+    {"name": "Front", "platform": "ashby", "token": "frontapp", "startup": True, "website": "https://front.com"},
+    {"name": "Gusto", "platform": "greenhouse", "token": "gusto", "startup": True, "website": "https://gusto.com"},
+    {"name": "HubSpot", "platform": "greenhouse", "token": "hubspot", "startup": False, "website": "https://www.hubspot.com"},
+    {"name": "Instawork", "platform": "greenhouse", "token": "instawork", "startup": True, "website": "https://www.instawork.com"},
+    {"name": "Intercom", "platform": "greenhouse", "token": "intercom", "startup": True, "website": "https://www.intercom.com"},
+    {"name": "Loom", "platform": "ashby", "token": "loom", "startup": True, "website": "https://www.loom.com"},
+    {"name": "Middesk", "platform": "ashby", "token": "middesk", "startup": True, "website": "https://www.middesk.com"},
+    {"name": "Olo", "platform": "lever", "token": "olo", "startup": False, "website": "https://www.olo.com"},
+    {"name": "SpotOn", "platform": "ashby", "token": "spoton", "startup": True, "website": "https://spoton.com"},
+    {"name": "Superhuman", "platform": "ashby", "token": "superhuman", "startup": True, "website": "https://superhuman.com"},
+    {"name": "Wonolo", "platform": "lever", "token": "wonolo", "startup": True, "website": "https://www.wonolo.com"},
+    {"name": "Y Combinator", "platform": "ashby", "token": "ycombinator", "startup": True, "website": "https://www.ycombinator.com"},
+    {"name": "ezCater", "platform": "lever", "token": "ezcater", "startup": True, "website": "https://www.ezcater.com"},
+
+    # ── Climate / energy tech ──
+    {"name": "Aurora Solar", "platform": "ashby", "token": "aurorasolar", "startup": True, "website": "https://www.aurorasolar.com"},
+    {"name": "Redwood Materials", "platform": "greenhouse", "token": "redwoodmaterials", "startup": True, "website": "https://www.redwoodmaterials.com"},
+    {"name": "Span", "platform": "ashby", "token": "span", "startup": True, "website": "https://www.span.io"},
+
+    # ── Consumer / retail ──
+    {"name": "Airbnb", "platform": "greenhouse", "token": "airbnb", "startup": False, "website": "https://www.airbnb.com"},
+    {"name": "Away", "platform": "ashby", "token": "away", "startup": True, "website": "https://www.awaytravel.com"},
+    {"name": "Calm", "platform": "greenhouse", "token": "calm", "startup": True, "website": "https://www.calm.com"},
+    {"name": "Cameo", "platform": "greenhouse", "token": "cameo", "startup": True, "website": "https://www.cameo.com"},
+    {"name": "ClassPass", "platform": "greenhouse", "token": "classpass", "startup": True, "website": "https://classpass.com"},
+    {"name": "Glossier", "platform": "greenhouse", "token": "glossier", "startup": True, "website": "https://www.glossier.com"},
+    {"name": "Life360", "platform": "greenhouse", "token": "life360", "startup": False, "website": "https://www.life360.com"},
+    {"name": "Lyft", "platform": "greenhouse", "token": "lyft", "startup": False, "website": "https://www.lyft.com"},
+    {"name": "Nextdoor", "platform": "greenhouse", "token": "nextdoor", "startup": False, "website": "https://about.nextdoor.com"},
+    {"name": "Oura", "platform": "greenhouse", "token": "oura", "startup": True, "website": "https://ouraring.com"},
+    {"name": "Patreon", "platform": "ashby", "token": "patreon", "startup": True, "website": "https://www.patreon.com"},
+    {"name": "Peloton", "platform": "greenhouse", "token": "peloton", "startup": False, "website": "https://www.onepeloton.com"},
+    {"name": "Poshmark", "platform": "greenhouse", "token": "poshmark", "startup": False, "website": "https://poshmark.com"},
+    {"name": "Rent the Runway", "platform": "greenhouse", "token": "renttherunway", "startup": False, "website": "https://www.renttherunway.com"},
+    {"name": "Spotify", "platform": "lever", "token": "spotify", "startup": False, "website": "https://www.spotify.com"},
+    {"name": "Strava", "platform": "ashby", "token": "strava", "startup": True, "website": "https://www.strava.com"},
+    {"name": "TaskRabbit", "platform": "greenhouse", "token": "taskrabbit", "startup": False, "website": "https://www.taskrabbit.com"},
+    {"name": "Thumbtack", "platform": "ashby", "token": "thumbtack", "startup": True, "website": "https://www.thumbtack.com"},
+
+    # ── Crypto / Web3 ──
+    {"name": "Alchemy", "platform": "ashby", "token": "alchemy", "startup": True, "website": "https://www.alchemy.com"},
+    {"name": "BitGo", "platform": "greenhouse", "token": "bitgo", "startup": True, "website": "https://www.bitgo.com"},
+    {"name": "Consensys", "platform": "greenhouse", "token": "consensys", "startup": True, "website": "https://consensys.io"},
+    {"name": "Kraken", "platform": "lever", "token": "kraken", "startup": True, "website": "https://www.kraken.com"},
+    {"name": "MoonPay", "platform": "lever", "token": "moonpay", "startup": True, "website": "https://www.moonpay.com"},
+    {"name": "OpenSea", "platform": "ashby", "token": "opensea", "startup": True, "website": "https://opensea.io"},
+    {"name": "Ripple", "platform": "greenhouse", "token": "ripple", "startup": True, "website": "https://ripple.com"},
+    {"name": "Solana Labs", "platform": "ashby", "token": "solanalabs", "startup": True, "website": "https://solanalabs.com"},
+
+    # ── Cybersecurity ──
+    {"name": "Abnormal Security", "platform": "greenhouse", "token": "abnormalsecurity", "startup": True, "website": "https://abnormalsecurity.com"},
+    {"name": "Huntress", "platform": "greenhouse", "token": "huntress", "startup": True, "website": "https://www.huntress.com"},
+    {"name": "Netskope", "platform": "greenhouse", "token": "netskope", "startup": True, "website": "https://www.netskope.com"},
+    {"name": "Rubrik", "platform": "greenhouse", "token": "rubrik", "startup": False, "website": "https://www.rubrik.com"},
+    {"name": "Semgrep", "platform": "ashby", "token": "semgrep", "startup": True, "website": "https://semgrep.dev"},
+    {"name": "Snyk", "platform": "ashby", "token": "snyk", "startup": True, "website": "https://snyk.io"},
+    {"name": "Tanium", "platform": "greenhouse", "token": "tanium", "startup": True, "website": "https://www.tanium.com"},
+    {"name": "Wiz", "platform": "ashby", "token": "wiz", "startup": True, "website": "https://www.wiz.io"},
+    {"name": "Zscaler", "platform": "greenhouse", "token": "zscaler", "startup": False, "website": "https://www.zscaler.com"},
+
+    # ── Dev tools / data infra ──
+    {"name": "CircleCI", "platform": "greenhouse", "token": "circleci", "startup": True, "website": "https://circleci.com"},
+    {"name": "Cribl", "platform": "greenhouse", "token": "cribl", "startup": True, "website": "https://cribl.io"},
+    {"name": "Fivetran", "platform": "greenhouse", "token": "fivetran", "startup": True, "website": "https://www.fivetran.com"},
+    {"name": "Grafana Labs", "platform": "greenhouse", "token": "grafanalabs", "startup": True, "website": "https://grafana.com"},
+    {"name": "Hightouch", "platform": "greenhouse", "token": "hightouch", "startup": True, "website": "https://hightouch.com"},
+    {"name": "Monte Carlo", "platform": "ashby", "token": "montecarlodata", "startup": True, "website": "https://www.montecarlodata.com"},
+    {"name": "New Relic", "platform": "greenhouse", "token": "newrelic", "startup": False, "website": "https://newrelic.com"},
+    {"name": "Nutanix", "platform": "ashby", "token": "nutanix", "startup": False, "website": "https://www.nutanix.com"},
+    {"name": "Sentry", "platform": "ashby", "token": "sentry", "startup": True, "website": "https://sentry.io"},
+
+    # ── EdTech ──
+    {"name": "Course Hero", "platform": "greenhouse", "token": "coursehero", "startup": True, "website": "https://www.coursehero.com"},
+    {"name": "Coursera", "platform": "greenhouse", "token": "coursera", "startup": False, "website": "https://www.coursera.org"},
+    {"name": "Guild Education", "platform": "greenhouse", "token": "guild", "startup": True, "website": "https://www.guild.com"},
+    {"name": "Handshake", "platform": "ashby", "token": "handshake", "startup": True, "website": "https://joinhandshake.com"},
+    {"name": "Outschool", "platform": "greenhouse", "token": "outschool", "startup": True, "website": "https://outschool.com"},
+
+    # ── Fintech ──
+    {"name": "Acorns", "platform": "ashby", "token": "acorns", "startup": True, "website": "https://www.acorns.com"},
+    {"name": "Bill.com", "platform": "greenhouse", "token": "billcom", "startup": False, "website": "https://www.bill.com"},
+    {"name": "Brex", "platform": "greenhouse", "token": "brex", "startup": True, "website": "https://www.brex.com"},
+    {"name": "Dave", "platform": "ashby", "token": "dave", "startup": False, "website": "https://www.dave.com"},
+    {"name": "Highbeam", "platform": "ashby", "token": "highbeam", "startup": True, "website": "https://www.highbeam.co"},
+    {"name": "Marqeta", "platform": "greenhouse", "token": "marqeta", "startup": False, "website": "https://www.marqeta.com"},
+    {"name": "NerdWallet", "platform": "ashby", "token": "nerdwallet", "startup": False, "website": "https://www.nerdwallet.com"},
+    {"name": "Novo", "platform": "ashby", "token": "novo", "startup": True, "website": "https://www.novo.co"},
+    {"name": "Public.com", "platform": "greenhouse", "token": "public", "startup": True, "website": "https://public.com"},
+    {"name": "Synctera", "platform": "ashby", "token": "synctera", "startup": True, "website": "https://synctera.com"},
+    {"name": "Treasury Prime", "platform": "greenhouse", "token": "treasuryprime", "startup": True, "website": "https://www.treasuryprime.com"},
+
+    # ── Gaming ──
+    {"name": "Epic Games", "platform": "greenhouse", "token": "epicgames", "startup": True, "website": "https://www.epicgames.com"},
+    {"name": "Niantic", "platform": "ashby", "token": "niantic", "startup": True, "website": "https://nianticlabs.com"},
+    {"name": "Riot Games", "platform": "greenhouse", "token": "riotgames", "startup": True, "website": "https://www.riotgames.com"},
+    {"name": "Rockstar Games", "platform": "greenhouse", "token": "rockstargames", "startup": False, "website": "https://www.rockstargames.com"},
+    {"name": "Scopely", "platform": "greenhouse", "token": "scopely", "startup": True, "website": "https://www.scopely.com"},
+
+    # ── Healthtech ──
+    {"name": "Abridge", "platform": "ashby", "token": "abridge", "startup": True, "website": "https://www.abridge.com"},
+    {"name": "Aledade", "platform": "lever", "token": "aledade", "startup": True, "website": "https://www.aledade.com"},
+    {"name": "Ambience Healthcare", "platform": "ashby", "token": "ambiencehealthcare", "startup": True, "website": "https://www.ambiencehealthcare.com"},
+    {"name": "Arcadia", "platform": "lever", "token": "arcadia", "startup": True, "website": "https://arcadia.io"},
+    {"name": "Butterfly Network", "platform": "greenhouse", "token": "butterflynetwork", "startup": False, "website": "https://www.butterflynetwork.com"},
+    {"name": "Carbon Health", "platform": "lever", "token": "carbonhealth", "startup": True, "website": "https://carbonhealth.com"},
+    {"name": "Cerebral", "platform": "greenhouse", "token": "cerebral", "startup": True, "website": "https://cerebral.com"},
+    {"name": "Cityblock Health", "platform": "ashby", "token": "cityblock", "startup": True, "website": "https://www.cityblock.com"},
+    {"name": "Clover Health", "platform": "greenhouse", "token": "cloverhealth", "startup": False, "website": "https://www.cloverhealth.com"},
+    {"name": "Cohere Health", "platform": "greenhouse", "token": "coherehealth", "startup": True, "website": "https://www.coherehealth.com"},
+    {"name": "Commure", "platform": "ashby", "token": "commure", "startup": True, "website": "https://www.commure.com"},
+    {"name": "Curai Health", "platform": "lever", "token": "curai", "startup": True, "website": "https://curaihealth.com"},
+    {"name": "Doximity", "platform": "greenhouse", "token": "doximity", "startup": False, "website": "https://www.doximity.com"},
+    {"name": "Found", "platform": "greenhouse", "token": "found", "startup": True, "website": "https://www.joinfound.com"},
+    {"name": "Headway", "platform": "ashby", "token": "headway", "startup": True, "website": "https://headway.co"},
+    {"name": "Included Health", "platform": "lever", "token": "includedhealth", "startup": True, "website": "https://www.includedhealth.com"},
+    {"name": "Komodo Health", "platform": "greenhouse", "token": "komodohealth", "startup": True, "website": "https://www.komodohealth.com"},
+    {"name": "Lyra Health", "platform": "lever", "token": "lyrahealth", "startup": True, "website": "https://www.lyrahealth.com"},
+    {"name": "Maven Clinic", "platform": "greenhouse", "token": "mavenclinic", "startup": True, "website": "https://www.mavenclinic.com"},
+    {"name": "Modern Health", "platform": "greenhouse", "token": "modernhealth", "startup": True, "website": "https://www.modernhealth.com"},
+    {"name": "Notable Health", "platform": "ashby", "token": "notable", "startup": True, "website": "https://www.notablehealth.com"},
+    {"name": "Nuna", "platform": "ashby", "token": "nuna", "startup": True, "website": "https://www.nuna.com"},
+    {"name": "One Medical", "platform": "greenhouse", "token": "onemedical", "startup": False, "website": "https://www.onemedical.com"},
+    {"name": "Overjet", "platform": "ashby", "token": "overjet", "startup": True, "website": "https://www.overjet.com"},
+    {"name": "Parsley Health", "platform": "greenhouse", "token": "parsleyhealth", "startup": True, "website": "https://www.parsleyhealth.com"},
+    {"name": "PathAI", "platform": "greenhouse", "token": "pathai", "startup": True, "website": "https://www.pathai.com"},
+    {"name": "Ro", "platform": "lever", "token": "ro", "startup": True, "website": "https://ro.co"},
+    {"name": "Sidecar Health", "platform": "greenhouse", "token": "sidecarhealth", "startup": True, "website": "https://sidecarhealth.com"},
+    {"name": "Suki AI", "platform": "greenhouse", "token": "suki", "startup": True, "website": "https://www.suki.ai"},
+    {"name": "Sword Health", "platform": "greenhouse", "token": "swordhealth", "startup": True, "website": "https://www.swordhealth.com"},
+    {"name": "Talkspace", "platform": "greenhouse", "token": "talkspace", "startup": False, "website": "https://www.talkspace.com"},
+    {"name": "Truveta", "platform": "greenhouse", "token": "truveta", "startup": True, "website": "https://truveta.com"},
+    {"name": "Waymark", "platform": "greenhouse", "token": "waymark", "startup": True, "website": "https://waymarkcare.com"},
+    {"name": "Zocdoc", "platform": "greenhouse", "token": "zocdoc", "startup": True, "website": "https://www.zocdoc.com"},
+
+    # ── Insurtech ──
+    {"name": "At-Bay", "platform": "greenhouse", "token": "atbay", "startup": True, "website": "https://www.at-bay.com"},
+    {"name": "Bestow", "platform": "ashby", "token": "bestow", "startup": True, "website": "https://www.bestow.com"},
+    {"name": "Branch Insurance", "platform": "ashby", "token": "branchinsurance", "startup": True, "website": "https://www.ourbranch.com"},
+    {"name": "Coalition", "platform": "greenhouse", "token": "coalition", "startup": True, "website": "https://www.coalitioninc.com"},
+    {"name": "Ethos Life", "platform": "greenhouse", "token": "ethoslife", "startup": True, "website": "https://www.ethoslife.com"},
+    {"name": "Kin Insurance", "platform": "ashby", "token": "kin", "startup": True, "website": "https://www.kin.com"},
+    {"name": "Lemonade", "platform": "ashby", "token": "lemonade", "startup": False, "website": "https://www.lemonade.com"},
+    {"name": "Openly", "platform": "ashby", "token": "openly", "startup": True, "website": "https://www.openly.com"},
+    {"name": "Pie Insurance", "platform": "greenhouse", "token": "pieinsurance", "startup": True, "website": "https://pieinsurance.com"},
+
+    # ── Legal tech ──
+    {"name": "Everlaw", "platform": "greenhouse", "token": "everlaw", "startup": True, "website": "https://www.everlaw.com"},
+
+    # ── Logistics / supply chain ──
+    {"name": "Bringg", "platform": "greenhouse", "token": "bringg", "startup": True, "website": "https://www.bringg.com"},
+    {"name": "DoorDash", "platform": "greenhouse", "token": "doordashusa", "startup": False, "website": "https://www.doordash.com"},
+    {"name": "Flexe", "platform": "greenhouse", "token": "flexe", "startup": True, "website": "https://www.flexe.com"},
+    {"name": "FourKites", "platform": "greenhouse", "token": "fourkites", "startup": True, "website": "https://www.fourkites.com"},
+    {"name": "Gopuff", "platform": "lever", "token": "gopuff", "startup": True, "website": "https://gopuff.com"},
+    {"name": "Loadsmart", "platform": "lever", "token": "loadsmart", "startup": True, "website": "https://www.loadsmart.com"},
+    {"name": "Uber Freight", "platform": "greenhouse", "token": "uberfreight", "startup": False, "website": "https://www.uberfreight.com"},
+    {"name": "Zipline", "platform": "greenhouse", "token": "flyzipline", "startup": True, "website": "https://www.flyzipline.com"},
+    {"name": "project44", "platform": "greenhouse", "token": "project44", "startup": True, "website": "https://www.project44.com"},
+
+    # ── Marketing tech ──
+    {"name": "Attentive", "platform": "greenhouse", "token": "attentive", "startup": True, "website": "https://www.attentive.com"},
+
+    # ── Quant trading / prop trading ──
+    {"name": "Akuna Capital", "platform": "greenhouse", "token": "akunacapital", "startup": False, "website": "https://akunacapital.com"},
+    {"name": "Belvedere Trading", "platform": "lever", "token": "belvederetrading", "startup": False, "website": "https://www.belvederetrading.com"},
+    {"name": "Hudson River Trading", "platform": "ashby", "token": "hrt", "startup": False, "website": "https://www.hudsonrivertrading.com"},
+    {"name": "Jump Trading", "platform": "greenhouse", "token": "jumptrading", "startup": False, "website": "https://www.jumptrading.com"},
+    {"name": "Optiver", "platform": "greenhouse", "token": "optiver", "startup": False, "website": "https://optiver.com"},
+    {"name": "Point72", "platform": "greenhouse", "token": "point72", "startup": False, "website": "https://www.point72.com"},
+    {"name": "Tower Research Capital", "platform": "greenhouse", "token": "towerresearchcapital", "startup": False, "website": "https://www.tower-research.com"},
+
+    # ── Space ──
+    {"name": "Astranis", "platform": "greenhouse", "token": "astranis", "startup": True, "website": "https://www.astranis.com"},
 ]
 
 # Only postings whose title looks like an internship / co-op / new-grad /
