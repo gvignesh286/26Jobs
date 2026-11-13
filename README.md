@@ -1,6 +1,8 @@
-# 🎯 Daily Internship & Fellowship Tracker
+# 🎯 Daily Job Tracker: full-time new grad / entry-level
 
-Automatically pulls live internship and fellowship postings every weekday at **8:00 AM PST**, scores them against your resume/skills profile, updates `jobs.xlsx` in this repo, and posts a summary to Discord if configured.
+Automatically pulls live **full-time** new-grad and entry-level postings every weekday at **8:00 AM PST**, scores them against your resume/skills profile, updates `jobs.xlsx` in this repo, and posts a summary to Discord if configured. Explicit new-grad and entry-level roles are ranked first.
+
+> **Since Nov 2026 this is full-time only.** Internships, co-ops and fellowships are no longer collected (see "Nov 2026: full-time only" below). The sections further down describe how the tracker evolved and still mention internships in places.
 
 ---
 
@@ -152,6 +154,43 @@ Also:
 - Starbucks and American Express searches now include analyst and solutions-engineer queries.
 - `jobs.xlsx` was reset (headers kept) so the sheet rebuilds under the new rules.
 
+### Nov 2026: full-time only, no master's, new grad first
+Giri asked for strictly full-time jobs, no master's-required roles, and new-grad / entry-level roles first. Fixes from the sibling new-grad tracker were ported over.
+
+**Internships dropped**
+- `INTERNSHIP_TITLE_RE` now means "drop": intern, co-op, fellowship, apprentice and summer analyst titles are hard-excluded everywhere.
+- SimplifyJobs now pulls its [New-Grad-Positions](https://github.com/SimplifyJobs/New-Grad-Positions) list instead of the internship list.
+- UW is filtered to full-time and remote. YC skips non-full-time postings.
+- The **Internships tab is deleted**, and `jobs.xlsx` was reset again so no old internship rows linger.
+
+**What qualifies**
+- An explicit new-grad title (`NEW_GRAD_TITLE_RE`: new grad, university grad, early career, entry level, campus undergraduate, rotational, associate product manager).
+- A junior / associate / level-I title (`JUNIOR_TITLE_RE`).
+- A `TARGET_TITLE_RE` role.
+- Any title on Simplify's new-grad list.
+
+**Hard drops**
+- **Mid-level titles** (`MID_LEVEL_TITLE_RE`): II/III/2/3 after the role, e.g. "Technical Account Manager 3", "Software Engineer II", "Level 3", "mid-level", "experienced". An explicit new-grad label overrides this.
+- **Master's**:
+  - "Master's"/"Masters" in the title (Pinterest's "Master's Machine Learning…", Amex's "Campus Graduate Masters…").
+  - Master's-required language in the description (`MASTERS_REQUIRED_RE`). "Preferred" is fine.
+- **Experience**: every stated requirement is 3+ years (`EXPERIENCE_HARD_DROP_YEARS`), unless the title explicitly says new grad.
+- **Earlier grad cohort** (`targets_earlier_cohort()`): e.g. "2026 New Grad" when you graduate May 2027. This replaces the underclassman filter, which only made sense for internships.
+- **Non-US**: the location list now covers many more countries and regions (LatAm, EMEA, Estonia, Colombia, England…), and it's checked against the **title too**, which catches "Analytics Engineer (LatAm)".
+
+**Role-fit priority**
+
+| Evidence | Points |
+|---|---|
+| Explicit new-grad title | 25 |
+| Entry-level / junior / level-I title | 23 |
+| On Simplify's new-grad list | 22 |
+| Target title + entry-level description (new grad, 0–2 yrs, ≤1 yr) | 20 |
+| YC full-time | 18 |
+| Target title with no entry-level evidence anywhere | 12 |
+
+A target role with no entry-level evidence now needs a strong skill and location match to reach 55.
+
 ## How filtering + scoring works
 
 1. **Title filter** — only postings whose title contains `intern`, `co-op`, `new grad`, or `early career` survive at all (drops the senior/staff SWE postings that are also on these boards).
@@ -196,12 +235,11 @@ If this secret isn't set, the scraper just skips the notification — the Excel 
 
 ## Viewing your jobs
 
-`jobs.xlsx` has three tabs:
-- **Internships** — postings whose title is literally an internship, co-op, or fellowship
-- **Jobs** — everything else that qualified (new-grad titles, YC full-time roles) — same 55+ bar, just not internship-labeled
-- **Startups** — a same-day mirror of both tabs above, narrowed to companies tagged `startup: True` **and** located in Seattle, the SF Bay Area, Texas, Arizona, or remote (`STARTUP_TAB_LOCATION_RE`). See "Startup-tag gap" above for how that tag gets set for companies outside the curated `COMPANIES` list.
+`jobs.xlsx` has two tabs (the Internships tab was retired in Nov 2026):
+- **Jobs** — every full-time match (new-grad titles, entry-level titles, target roles, YC full-time) at the 55+ bar
+- **Startups** — a same-day mirror of Jobs, narrowed to companies tagged `startup: True` **and** located in Seattle, the SF Bay Area, Texas, Arizona, or remote (`STARTUP_TAB_LOCATION_RE`). See "Startup-tag gap" above for how that tag gets set for companies outside the curated `COMPANIES` list.
 
-Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns (same on all three tabs):
+Download `jobs.xlsx` from the repo and open in Excel/Google Sheets. Columns (same on both tabs):
 
 | Column | What it shows |
 |---|---|

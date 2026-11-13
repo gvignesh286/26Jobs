@@ -1,5 +1,5 @@
 """
-Giri Vignesh — Daily Internship Tracker
+Giri Vignesh — Daily Job Tracker (full-time new grad / entry-level)
 Pulls live postings directly from Greenhouse / Lever / Ashby job-board APIs
 (no scraping, no blocking, no API key), filters to internship/co-op/
 fellowship/new-grad roles, scores them against your resume profile, writes/
@@ -464,14 +464,88 @@ COMPANIES = [
     {"name": "Astranis", "platform": "greenhouse", "token": "astranis", "startup": True, "website": "https://www.astranis.com"},
 ]
 
-# Only postings whose title looks like an internship / co-op / new-grad /
-# fellowship role are kept — everything else on these boards (senior/staff
-# SWE, etc.) is dropped before scoring so the sheet doesn't fill up with
-# irrelevant rows. Fellowship programs (e.g. Anthropic Fellows Program,
-# Scale AI's ML Fellow track) are treated the same as internships.
+# Full-time only (Nov 2026): internship / co-op / fellowship / apprentice
+# titles are now a hard DROP, not a target. \bintern\b doesn't match
+# "internal".
 INTERNSHIP_TITLE_RE = re.compile(
-    r"(?i)\b(intern(ship)?s?|co-?op|new grad|university grad|early career|"
-    r"fellow(ship)?s?)\b"
+    r"(?i)\b(intern(ship)?s?|co-?op|fellow(ship)?s?|apprentice(ship)?s?|"
+    r"summer (analyst|associate))\b"
+)
+
+# Explicit new-grad / entry-level label — the top-priority signal. Overrides
+# SENIORITY_AVOID_RE / MID_LEVEL_TITLE_RE (Amex posts "Campus Undergraduate
+# Full-Time Associate"; some boards post "Software Engineer I/II, New Grad").
+# Deliberately absent: bare "APM" (Datadog's APM = Application Performance
+# Monitoring) and "Campus Graduate" (Amex's grad-school track).
+NEW_GRAD_TITLE_RE = re.compile(
+    r"(?i)\b(new[- ]?grad(uate)?s?|recent (college )?grad(uate)?s?|"
+    r"(university|college) (grad(uate)?s?|hire|hires|recruiting)|"
+    r"campus (undergrad(uate)?|hire|hires|recruiting)|"
+    r"undergrad(uate)? (software|engineer|full[- ]time)|"
+    r"early[- ]career|entry[- ]level|graduate (software|engineer|developer|"
+    r"data|product|analyst|scientist|hire)|"
+    r"rotational( program)?|associate product manager)\b"
+)
+
+# Weaker title-level entry signals — junior/associate titles and level-1
+# designations ("Software Engineer I", "SDE 1", "Data Analyst I"). The
+# (?![a-z0-9+]) lookahead keeps "Engineer in Test" / "Engineer 1+ yrs" out.
+JUNIOR_TITLE_RE = re.compile(
+    r"(?i)\b(junior|jr\.?|associate)\b|"
+    r"\b(engineer|developer|sde|swe|scientist|analyst|programmer)\s*,?\s*"
+    r"(i|1)(?![a-z0-9+])"
+)
+
+# Mid-level designations — "Software Engineer II/III", "SDE 2", "Technical
+# Account Manager 3" (a real 90% row on the first non-SWE run), "Level 3",
+# "mid-level", "experienced". Dropped unless the title also carries an
+# explicit new-grad label.
+MID_LEVEL_TITLE_RE = re.compile(
+    r"(?i)\b(engineer|developer|sde|swe|scientist|analyst|programmer|manager|"
+    r"consultant|specialist|architect|associate|administrator|representative)"
+    r"\s*,?\s*(ii|iii|iv|v|2|3|4|5)(?![a-z0-9])|"
+    r"\blevel\s*[2-9]\b|\bmid[- ]level\b|\bexperienced\b"
+)
+
+# Description-level entry signals — lift a plain target title ("Data
+# Analyst", "Solutions Engineer") above one with no entry-level evidence.
+ENTRY_LEVEL_DESC_RE = re.compile(
+    r"(?i)\b(new[- ]?grad(uate)?s?|recent (college |university )?grad(uate)?s?|"
+    r"entry[- ]level|early[- ]career|"
+    r"no (prior |previous )?(professional |industry |work )?experience (is )?required|"
+    r"graduating (in|by|between|before)|expected graduation|"
+    r"0\s*(-|–|to)\s*[12]\s*years?|0\+?\s*years?)\b"
+)
+
+# Years-of-experience requirements ("3+ years of experience", "2-4 years of
+# professional software experience"). The number must be within a few
+# words of "experience" so "founded 10 years ago" doesn't count.
+YEARS_EXPERIENCE_RE = re.compile(
+    r"(?i)(?:at least|minimum of|min\.?)?\s*(\d{1,2})\s*\+?\s*"
+    r"(?:(?:-|–|to)\s*\d{1,2}\s*\+?\s*)?(?:or more\s+)?years?['’]?\s+"
+    r"(?:of\s+)?(?:[a-z/&,-]+\s+){0,4}?experience"
+)
+# Every stated requirement >= this many years → not a new-grad role, drop
+# (unless the title explicitly says new grad). <= MAX_ENTRY_YEARS counts as
+# an entry-level signal.
+EXPERIENCE_HARD_DROP_YEARS = 3
+MAX_ENTRY_YEARS = 1
+
+
+def min_years_required(text: str) -> int | None:
+    years = [int(m.group(1)) for m in YEARS_EXPERIENCE_RE.finditer(text or "")]
+    years = [y for y in years if y <= 20]
+    return min(years) if years else None
+
+
+# Master's-required language in a description — a hard drop, same as a
+# master's/PhD title. "Master's preferred" is NOT caught (still eligible).
+MASTERS_REQUIRED_RE = re.compile(
+    r"(?i)\b((master'?s|m\.?s\.?|graduate) degree (is )?required|"
+    r"requires? an? (master'?s|graduate degree)|"
+    r"must (have|hold|possess) an? master'?s|"
+    r"currently (enrolled|pursuing)( in)? an? (master'?s|graduate)|"
+    r"master'?s (students?|candidates?) only)\b"
 )
 
 # Entry-level non-SWE titles a CS grad is also hireable for (Nov 2026
@@ -544,7 +618,12 @@ def title_is_target(title: str) -> bool:
 
 
 def title_qualifies(title: str) -> bool:
-    return bool(INTERNSHIP_TITLE_RE.search(title or "")) or title_is_target(title)
+    """Full-time only: never an internship; must be explicitly new-grad,
+    junior/level-I, or a TARGET_TITLE_RE role."""
+    title = title or ""
+    if INTERNSHIP_TITLE_RE.search(title):
+        return False
+    return bool(NEW_GRAD_TITLE_RE.search(title) or JUNIOR_TITLE_RE.search(title)) or title_is_target(title)
 
 
 def is_non_technical(title: str) -> bool:
@@ -576,26 +655,30 @@ NON_TECHNICAL_ROLE_RE = re.compile(
 # Hard title exclusions, split into two categories that get treated
 # differently in score_job():
 #
-# SENIORITY — an explicit intern/co-op/fellowship/new-grad label in the
-# title overrides this (e.g. "Product Manager Summer 2027 Intern" — the
-# base title "Product Manager" isn't a seniority signal by itself once
-# it's explicitly labeled an internship). Also covers founder-level/
+# SENIORITY — an explicit new-grad label in the title (NEW_GRAD_TITLE_RE)
+# overrides this. Also covers founder-level/
 # executive titles common on the YC source (small startups often hire
 # "Founding Engineer"/CTO as an experienced-only role).
 SENIORITY_AVOID_RE = re.compile(
-    r"(?i)\b(senior|sr\.?|staff|principal|director|manager|lead|"
+    r"(?i)\b(senior|sr\.?|staff|principal|directors?|managers?|leads?|"
     r"founding|chief technology officer|\bcto\b|head of|"
     r"postdoc(toral)?|research scientist)\b"
 )
 
 
 def seniority_blocks(title: str) -> str | None:
-    """Returns the seniority word that disqualifies `title`, or None. An
-    intern/co-op/fellowship/new-grad label overrides it (see above). A bare
+    """Returns the seniority/mid-level word that disqualifies `title`, or
+    None. An explicit new-grad label overrides it (see above). A bare
     "manager" is also forgiven when it's part of a MANAGER_TARGET_TITLE_RE
     phrase — the rest of the title is re-checked with that phrase removed."""
-    hit = SENIORITY_AVOID_RE.search(title or "")
-    if not hit or INTERNSHIP_TITLE_RE.search(title):
+    title = title or ""
+    if NEW_GRAD_TITLE_RE.search(title):
+        return None
+    mid_hit = MID_LEVEL_TITLE_RE.search(title)
+    if mid_hit:
+        return mid_hit.group(0)
+    hit = SENIORITY_AVOID_RE.search(title)
+    if not hit:
         return None
     hits = {m.group(0).lower() for m in SENIORITY_AVOID_RE.finditer(title)}
     if hits == {"manager"} and MANAGER_TARGET_TITLE_RE.search(title):
@@ -616,9 +699,13 @@ def seniority_blocks(title: str) -> str | None:
 # lookaround boundary style as skill_pattern() for the phd variants.
 GRAD_DEGREE_AVOID_RE = re.compile(
     r"(?i)(?<![a-z0-9])(phd|ph\.d\.?)(?![a-z0-9])|"
-    r"\b(phd student|graduate program|"
-    r"master'?s?\s+student|doctoral( student)?|graduate researcher|mba)\b"
+    r"\b(phd student|master'?s|doctoral( student)?|graduate researcher|mba)\b"
 )
+# "master's"/"masters" (not bare "master" — that would hit "Scrum Master")
+# catches master's-only tracks: Pinterest's "Master's Machine Learning ...",
+# DoorDash's "... (Masters)", Amex's "Campus Graduate Masters Full-Time ...".
+# "graduate program" was dropped from this list — for full-time roles it
+# usually means a new-grad rotational program, not grad school.
 
 # Whole-domain exclusions — checked against title+description since these
 # fields sometimes only show up in the description, not the title. Not a
@@ -653,44 +740,49 @@ NON_US_LOCATION_RE = re.compile(
     r"mexico|poland|warsaw|portugal|lisbon|switzerland|zurich|sweden|"
     r"stockholm|denmark|copenhagen|norway|oslo|israel|tel aviv|"
     r"philippines|manila|vietnam|indonesia|jakarta|malaysia|"
-    r"south africa|new zealand|austria|vienna|belgium|brussels)\b"
+    r"south africa|new zealand|austria|vienna|belgium|brussels|"
+    # Full-time boards post many "Remote - <country>" / "(LatAm)" reqs —
+    # Twilio's "Remote - Estonia", Docker's "England (Remote)" and
+    # Homeward's "Analytics Engineer (LatAm)" all got through before this.
+    # Also checked against the TITLE now, not just the location field.
+    # (Athens/Cairo/Peru left out — they're also US place names.)
+    r"england|scotland|wales|emea|apac|latam|dach|europe|estonia|"
+    r"colombia|bogota|argentina|buenos aires|chile|lima, peru|costa rica|"
+    r"uruguay|romania|bucharest|czech|prague|ukraine|kyiv|lithuania|"
+    r"latvia|finland|helsinki|greece|turkey|istanbul|egypt|"
+    r"nigeria|lagos|kenya|nairobi|uae|dubai|abu dhabi|saudi|riyadh|qatar|"
+    r"korea|seoul|taiwan|taipei|hong kong|thailand|bangkok|pakistan|"
+    r"bangladesh|sri lanka|bulgaria|sofia|croatia|hungary|budapest|"
+    r"slovakia|slovenia|luxembourg|iceland|gurugram|gurgaon|"
+    r"pune|chennai|noida)\b"
 )
 
-# Underclassman eligibility signals. Giri is now a graduating senior (grad
-# May 2027) targeting New Grad roles — an internship explicitly gated to
-# students with 2+ years of school left (freshmen/sophomores/juniors) isn't
-# a fit even if it otherwise looks like a strong internship match. Checked
-# against description text (this eligibility language is essentially never
-# in the title itself). Internships open to Giri's own class, or with no
-# class-year restriction stated, are NOT caught by this — only explicit
-# underclassman-targeting language is.
-UNDERCLASSMAN_ELIGIBILITY_RE = re.compile(
-    r"(?i)\b(rising sophomores?|rising juniors?|rising seniors?|freshm(a|e)n|"
-    r"first-year students?|second-year students?|third-year students?|"
-    r"sophomore year|penultimate year|"
-    r"at least one more (year|semester) (of school|remaining)|"
-    r"must (have|complete) (at least )?one more year|"
-    r"not (in your|graduating in your) final year)\b"
-)
-
-# "Class of 20XX" eligibility requirements naming a grad year later than
-# Giri's own (see CONTACT["grad"]) also signal the posting wants someone
-# with more school left. Extracted and compared numerically against
-# GRAD_YEAR rather than hardcoding specific years, so this doesn't quietly
-# go stale as time passes.
-CLASS_OF_YEAR_RE = re.compile(r"(?i)\bclass of (20\d{2})\b")
+# Wrong-cohort filter. Giri graduates May 2027, so a new-grad role aimed at
+# an EARLIER graduating class (a "2026 New Grad" req, "Class of 2025", or
+# "must have graduated between Dec 2025 and Jun 2026") starts before he
+# can. Years are compared against GRAD_YEAR (parsed from CONTACT["grad"]),
+# so this doesn't go stale. Any year >= GRAD_YEAR in the same context keeps
+# the posting (e.g. "Dec 2026 – Jun 2027 grads"). Replaces the old
+# underclassman filter, which only made sense for internships.
 GRAD_YEAR = int(re.search(r"\d{4}", CONTACT["grad"]).group())
+TITLE_YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+CLASS_OF_YEAR_RE = re.compile(r"(?i)\bclass of (20\d{2})\b")
+GRAD_WINDOW_RE = re.compile(r"(?i)\bgraduat(?:e|ed|ing|ion)\b[^.;:]{0,80}")
 
 
-def targets_underclassman(text: str) -> str | None:
-    """Returns the matched phrase if `text` targets a student with more
-    than one year of school left after Giri's own graduation, else None."""
-    hit = UNDERCLASSMAN_ELIGIBILITY_RE.search(text)
-    if hit:
-        return hit.group(0)
-    for m in CLASS_OF_YEAR_RE.finditer(text):
-        if int(m.group(1)) > GRAD_YEAR:
-            return m.group(0)
+def targets_earlier_cohort(title: str, description: str) -> str | None:
+    title_years = [int(y) for y in TITLE_YEAR_RE.findall(title)]
+    if title_years and max(title_years) < GRAD_YEAR:
+        return f"{max(title_years)} in title"
+    class_years = [int(y) for y in CLASS_OF_YEAR_RE.findall(description)]
+    if class_years and max(class_years) < GRAD_YEAR:
+        return f"class of {max(class_years)}"
+    window_years = [
+        int(y) for m in GRAD_WINDOW_RE.finditer(description)
+        for y in TITLE_YEAR_RE.findall(m.group(0))
+    ]
+    if window_years and max(window_years) < GRAD_YEAR:
+        return f"graduation window ends {max(window_years)}"
     return None
 
 
@@ -813,7 +905,7 @@ FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetch
 # description text, so CATEGORY_TEXT below substitutes for it in scoring.
 SIMPLIFY_LISTINGS_URL = (
     "https://raw.githubusercontent.com/SimplifyJobs/"
-    "Summer2026-Internships/dev/.github/scripts/listings.json"
+    "New-Grad-Positions/dev/.github/scripts/listings.json"
 )
 
 CATEGORY_TEXT = {
@@ -1031,6 +1123,7 @@ def fetch_yc() -> list[dict]:
                 role_type = j.get("roleType") or ""
                 location = j.get("location", "")
                 if (key in DEFENSE_COMPANY_BLOCKLIST
+                        or (j.get("jobType") or "Full-time") != "Full-time"
                         or DOMAIN_EXCLUDE_RE.search(one_liner)
                         or role_type in YC_EXCLUDED_ROLE_TYPES
                         or _yc_location_is_non_us(location)):
@@ -1069,8 +1162,7 @@ def fetch_yc() -> list[dict]:
 # actual career-services pages, not just inferred.
 UW_JOBS_URL = (
     "https://careers.uw.edu/jobs/"
-    "?ctag%5B0%5D=full-time-jobs&ctag%5B1%5D=internships"
-    "&ctag%5B2%5D=part-time-jobs&ctag%5B3%5D=remote-jobs"
+    "?ctag%5B0%5D=full-time-jobs&ctag%5B1%5D=remote-jobs"
     "&stag[]=tech-data-gaming"
 )
 
@@ -1150,6 +1242,8 @@ def _cheap_title_survives(title: str) -> bool:
     details call. Not a substitute for score_job()'s real hard filters
     (which still run once description text is available) - just avoids
     fetching details for titles that would obviously fail anyway."""
+    if INTERNSHIP_TITLE_RE.search(title):
+        return False
     if seniority_blocks(title):
         return False
     if GRAD_DEGREE_AVOID_RE.search(title):
@@ -1357,14 +1451,14 @@ def scrape_jobs() -> list[dict]:
         fetcher = FETCHERS[company["platform"]]
         try:
             jobs = fetcher(company)
-            internship_jobs = [
+            qualifying_jobs = [
                 j for j in jobs
                 if title_qualifies(j["title"])
                 and not is_non_technical(j["title"])
             ]
             print(f"{company['name']:28s} ({company['platform']:10s}): "
-                  f"{len(jobs):4d} total, {len(internship_jobs):3d} internship-tagged")
-            all_jobs.extend(internship_jobs)
+                  f"{len(jobs):4d} total, {len(qualifying_jobs):3d} qualifying")
+            all_jobs.extend(qualifying_jobs)
         except Exception as e:
             print(f"{company['name']:28s} ({company['platform']:10s}): FAILED — {e}")
         time.sleep(0.3)  # be polite to free public APIs
@@ -1375,16 +1469,18 @@ def scrape_jobs() -> list[dict]:
 
     try:
         simplify_jobs = fetch_simplify()
-        internship_jobs = [
+        # Every entry on SimplifyJobs' New-Grad-Positions list is already a
+        # curated new-grad role, so no title label is required here.
+        qualifying_jobs = [
             j for j in simplify_jobs
-            if title_qualifies(j["title"])
+            if not INTERNSHIP_TITLE_RE.search(j["title"])
             and not is_non_technical(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
-        print(f"{'SimplifyJobs aggregator':28s} ({'simplify':10s}): "
-              f"{len(simplify_jobs):4d} total, {len(internship_jobs):3d} internship-tagged")
-        all_jobs.extend(internship_jobs)
-        seen_pairs.update((j["companyName"].lower(), j["title"].lower()) for j in internship_jobs)
+        print(f"{'SimplifyJobs new-grad list':28s} ({'simplify':10s}): "
+              f"{len(simplify_jobs):4d} total, {len(qualifying_jobs):3d} qualifying")
+        all_jobs.extend(qualifying_jobs)
+        seen_pairs.update((j["companyName"].lower(), j["title"].lower()) for j in qualifying_jobs)
     except Exception as e:
         print(f"{'SimplifyJobs aggregator':28s} ({'simplify':10s}): FAILED — {e}")
 
@@ -1395,6 +1491,7 @@ def scrape_jobs() -> list[dict]:
         qualifying_jobs = [
             j for j in yc_jobs
             if not is_non_technical(j["title"])
+            and not INTERNSHIP_TITLE_RE.search(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
         print(f"{'Y Combinator (WaaS)':28s} ({'yc':10s}): "
@@ -1411,6 +1508,7 @@ def scrape_jobs() -> list[dict]:
         qualifying_jobs = [
             j for j in uw_jobs
             if not is_non_technical(j["title"])
+            and not INTERNSHIP_TITLE_RE.search(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
         print(f"{'UW Career Center':28s} ({'uw':10s}): "
@@ -1429,6 +1527,7 @@ def scrape_jobs() -> list[dict]:
         qualifying_jobs = [
             j for j in starbucks_jobs
             if not is_non_technical(j["title"])
+            and not INTERNSHIP_TITLE_RE.search(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
         print(f"{'Starbucks':28s} ({'starbucks':10s}): "
@@ -1444,6 +1543,7 @@ def scrape_jobs() -> list[dict]:
             qualifying_jobs = [
                 j for j in oracle_jobs
                 if not is_non_technical(j["title"])
+                and not INTERNSHIP_TITLE_RE.search(j["title"])
                 and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
             ]
             print(f"{oracle_company['name']:28s} ({'oracle_orc':10s}): "
@@ -1496,20 +1596,38 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     is_uw = job["id"].startswith("uw:")
 
     # ── Hard title filter — drop regardless of skill/keyword overlap ──────
-    # Seniority: an explicit intern/co-op/fellowship/new-grad label overrides
-    # this. "manager"/"lead"/"staff" etc. are meant to catch seniority, but
-    # "manager" is also just the literal job title for Product roles at any
-    # level — "Product Manager Summer 2027 Intern" was getting killed by the
-    # bare "manager" match despite plainly self-labeling as an internship.
+    # Full-time only: internships / co-ops / fellowships never qualify.
+    intern_hit = INTERNSHIP_TITLE_RE.search(title)
+    if intern_hit:
+        return 0, [f"filtered: '{intern_hit.group(0)}' in title (full-time only)"]
+    # Seniority + mid-level (II/III/Manager 3): an explicit new-grad label
+    # overrides this, and so does a manager-named target title (see
+    # seniority_blocks()).
     seniority_hit = seniority_blocks(title)
     if seniority_hit:
         return 0, [f"filtered: '{seniority_hit}' in title"]
 
-    # Grad-degree: never overridable — a posting can be both an internship
-    # AND require a graduate degree ("... Internship ... PhD Student ...").
+    # Grad-degree: never overridable — a posting can be both new-grad AND
+    # require a graduate degree ("New Grad – PhD, Machine Learning").
     grad_hit = GRAD_DEGREE_AVOID_RE.search(title)
     if grad_hit:
         return 0, [f"filtered: '{grad_hit.group(0)}' in title"]
+    masters_hit = MASTERS_REQUIRED_RE.search(description)
+    if masters_hit:
+        return 0, [f"filtered: '{masters_hit.group(0)}' (master's required)"]
+
+    # Experience: every stated requirement >= EXPERIENCE_HARD_DROP_YEARS
+    # means it isn't an entry-level role. An explicit new-grad title is
+    # trusted over boilerplate ("3+ years" in a generic team blurb).
+    is_explicit_new_grad = bool(NEW_GRAD_TITLE_RE.search(title))
+    years_required = min_years_required(description)
+    if (years_required is not None and years_required >= EXPERIENCE_HARD_DROP_YEARS
+            and not is_explicit_new_grad):
+        return 0, [f"filtered: asks for {years_required}+ yrs experience"]
+
+    cohort_hit = targets_earlier_cohort(title, description)
+    if cohort_hit:
+        return 0, [f"filtered: earlier grad cohort ({cohort_hit})"]
 
     # ── Domain exclusion — cybersecurity / aerospace, title or description ─
     domain_hit = DOMAIN_EXCLUDE_RE.search(full_text)
@@ -1517,16 +1635,9 @@ def score_job(job: dict) -> tuple[int, list[str]]:
         return 0, [f"filtered: '{domain_hit.group(0)}' (excluded domain)"]
 
     # ── US-only — drop anything whose location names a foreign country/city ─
-    non_us_hit = NON_US_LOCATION_RE.search(location)
+    non_us_hit = NON_US_LOCATION_RE.search(location) or NON_US_LOCATION_RE.search(title)
     if non_us_hit:
         return 0, [f"filtered: '{non_us_hit.group(0)}' (non-US location)"]
-
-    # ── Underclassman eligibility — never overridable, same treatment as
-    # GRAD_DEGREE_AVOID_RE (an internship self-labeled as open to anyone can
-    # still explicitly require 2+ years of school left in the description).
-    underclass_hit = targets_underclassman(full_text)
-    if underclass_hit:
-        return 0, [f"filtered: targets underclassmen ('{underclass_hit}')"]
 
     # ── Recency — hard cutoff, checked here (not just scored below) so a
     # stale posting is dropped outright regardless of how well it otherwise
@@ -1572,37 +1683,34 @@ def score_job(job: dict) -> tuple[int, list[str]]:
         reasons.append(f"Skills: {', '.join(matched_skills[:6])}")
 
     # ── Title / role fit (0-25) ───────────────────────────────────────────
-    # New Grad now scores equal to Internship (was 12 vs 25) — Giri's a
-    # graduating senior targeting entry-level full-time roles, not chasing
-    # internships as the primary goal anymore.
-    if re.search(r"\bintern(ship)?s?\b", title):
-        score += 25
-        reasons.append("Internship title")
-    elif re.search(r"new grad|university grad|early career", title):
+    # Prioritizes explicit new-grad / entry-level evidence: a plain target
+    # title with no entry-level signal anywhere gets roughly half credit, so
+    # it needs a strong skill + location match to clear 55.
+    entry_title = JUNIOR_TITLE_RE.search(title) or re.search(
+        r"\b(entry[- ]level|level\s*1|graduate|grad)\b", title)
+    entry_desc = ENTRY_LEVEL_DESC_RE.search(description) or (
+        years_required is not None and years_required <= MAX_ENTRY_YEARS)
+    if is_explicit_new_grad:
         score += 25
         reasons.append("New-grad title")
-    elif re.search(r"fellow(ship)?s?", title):
+    elif entry_title:
         score += 23
-        reasons.append("Fellowship title")
-    elif re.search(r"co-?op", title):
+        reasons.append("Target role (entry-level title)" if title_is_target(title) else "Entry-level title")
+    elif job["id"].startswith("simplify:"):
+        score += 22
+        reasons.append("On SimplifyJobs new-grad list")
+    elif title_is_target(title) and entry_desc:
         score += 20
-        reasons.append("Co-op title")
-    elif title_is_target(title) and re.search(
-            r"\b(associate|junior|jr\.?|entry[- ]level|level\s*1|graduate|grad)\b"
-            r"|(?<![a-z0-9])(i|1)(?![a-z0-9])", title):
-        score += 25
-        reasons.append("Target role (entry-level title)")
+        reasons.append("Target role (entry-level per description)")
     elif title_is_target(title):
-        score += 20
-        reasons.append("Target role")
+        score += 12
+        reasons.append("Target role (no entry-level signal)")
     elif job["id"].startswith("yc:"):
-        # YC full-time postings rarely say "new grad" explicitly even when
-        # they're accessible — SENIORITY_AVOID_RE already screened out
-        # senior/staff/founding-engineer/CTO/lead titles, so what's left
-        # gets partial credit rather than zero. Same 55-point bar as every
-        # other source applies on top of this — no separate threshold.
-        score += 23
-        reasons.append("YC full-time (undergrad-eligible)")
+        # YC full-time postings rarely say "new grad" and have no real
+        # description to check — SENIORITY_AVOID_RE already screened out
+        # senior/staff/founding/CTO/lead titles. Verify experience yourself.
+        score += 18
+        reasons.append("YC full-time (verify experience req)")
 
     # ── Location (0-20) ───────────────────────────────────────────────────
     # "remote" matching as a bare substring means "Remote (IN)"/"Remote (UK)"
@@ -1660,18 +1768,12 @@ def chance_color(score: int) -> str:
 
 
 # ── Deduplicate against existing sheet ───────────────────────────────────
-INTERNSHIPS_SHEET_NAME = "Internships"
 JOBS_SHEET_NAME = "Jobs"
 STARTUP_SHEET_NAME = "Startups"
-
-# Tab routing: literal internship/co-op/fellowship titles go to the
-# Internships tab; everything else that qualified (new-grad, YC full-time)
-# goes to Jobs. Startups is a same-day mirror of both, filtered further.
-JOB_TYPE_TITLE_RE = re.compile(r"(?i)\b(intern(ship)?s?|co-?op|fellow(ship)?s?)\b")
-
-
-def is_internship_type(title: str) -> bool:
-    return bool(JOB_TYPE_TITLE_RE.search(title))
+SHEET_NAMES = (JOBS_SHEET_NAME, STARTUP_SHEET_NAME)
+# The tracker went full-time only in Nov 2026 — the old Internships tab is
+# deleted from jobs.xlsx on the next run if it's still there.
+RETIRED_SHEET_NAMES = ("Internships",)
 
 
 # Rows are appended forever otherwise — MAX_POSTING_AGE_DAYS (7) only stops
@@ -1688,7 +1790,7 @@ def purge_stale_rows(wb) -> int:
     the number of rows removed, for logging."""
     cutoff = datetime.today() - timedelta(days=MAX_ROW_AGE_DAYS)
     removed = 0
-    for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME, STARTUP_SHEET_NAME):
+    for name in SHEET_NAMES:
         if name not in wb.sheetnames:
             continue
         ws = wb[name]
@@ -1790,8 +1892,8 @@ def thin_border():
 def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
     """Returns the (job, score) pairs actually written — used to build the
     Discord notification so it only reports what's genuinely new today.
-    Routes each job to Internships or Jobs by title; Startups is a
-    same-day mirror of both, filtered further by startup tag + region."""
+    Every match goes to Jobs; Startups is a same-day mirror, filtered
+    further by startup tag + region."""
     added = []
 
     if os.path.exists(path):
@@ -1800,16 +1902,18 @@ def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
 
+    for name in RETIRED_SHEET_NAMES:
+        if name in wb.sheetnames:
+            del wb[name]
+
     sheets = {}
-    for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME, STARTUP_SHEET_NAME):
+    for name in SHEET_NAMES:
         if name in wb.sheetnames:
             sheets[name] = wb[name]
         else:
             sheets[name] = wb.create_sheet(name)
             _write_header(sheets[name])
-    ws_internships, ws_jobs, ws_startup = (
-        sheets[INTERNSHIPS_SHEET_NAME], sheets[JOBS_SHEET_NAME], sheets[STARTUP_SHEET_NAME]
-    )
+    ws_jobs, ws_startup = sheets[JOBS_SHEET_NAME], sheets[STARTUP_SHEET_NAME]
 
     purged = purge_stale_rows(wb)
     if purged:
@@ -1821,16 +1925,14 @@ def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
     # re-added, even if it's genuinely still open and gets rediscovered.
     existing_ids = {
         str(row[0])
-        for name in (INTERNSHIPS_SHEET_NAME, JOBS_SHEET_NAME)
-        for row in wb[name].iter_rows(min_row=2, values_only=True) if row[0]
+        for row in ws_jobs.iter_rows(min_row=2, values_only=True) if row[0]
     }
 
     startup_count = 0
     for job in jobs_scored:
         if job["id"] in existing_ids:
             continue
-        target_ws = ws_internships if is_internship_type(job["title"]) else ws_jobs
-        score = _append_row(target_ws, job)
+        score = _append_row(ws_jobs, job)
         if score is not None:
             added.append((job, score))
             is_target_region = STARTUP_TAB_LOCATION_RE.search((job.get("location") or "").lower())
@@ -1841,7 +1943,7 @@ def write_excel(jobs_scored: list[dict], path: str) -> list[tuple[dict, int]]:
     print(f"Added {len(added)} new postings "
           f"({startup_count} startup, Seattle/SF Bay/TX/AZ/remote) to the sheet.")
 
-    for ws in (ws_internships, ws_jobs, ws_startup):
+    for ws in (ws_jobs, ws_startup):
         ws.freeze_panes = "A2"
         for i, width in enumerate(COL_WIDTHS, 1):
             ws.column_dimensions[get_column_letter(i)].width = width
@@ -1945,7 +2047,7 @@ def notify_discord(webhook_url: str, added: list[tuple[dict, int]], companies_sc
     if not added:
         payload = {
             "embeds": [{
-                "title": "🎯 Daily Internship Tracker",
+                "title": "🎯 Daily Job Tracker",
                 "description": f"Ran today ({today}) — no new matches across {companies_scanned} companies. Full sheet attached below.",
                 "color": 0x1A3A5C,
             }]
@@ -1966,7 +2068,7 @@ def notify_discord(webhook_url: str, added: list[tuple[dict, int]], companies_sc
 
         payload = {
             "embeds": [{
-                "title": f"🎯 {len(added)} New Internship/Fellowship Match(es) — {today}",
+                "title": f"🎯 {len(added)} New Job Match(es) — {today}",
                 "description": description,
                 "color": 0x2ECC71,
                 "footer": {"text": f"Scanned {companies_scanned} companies"},
@@ -1996,7 +2098,7 @@ if __name__ == "__main__":
     output_path = os.path.join(os.path.dirname(__file__), "jobs.xlsx")
 
     jobs = scrape_jobs()
-    print(f"\n{len(jobs)} internship-tagged postings found across {len(COMPANIES)} companies.")
+    print(f"\n{len(jobs)} qualifying postings found across {len(COMPANIES)} companies.")
 
     added = write_excel(jobs, output_path)
 
