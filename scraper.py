@@ -34,6 +34,13 @@ PROFILE = {
         "data visualization", "tableau", "power bi", "excel", "kpi",
         "a/b testing", "statistics", "artificial intelligence",
         "product management", "product manager", "roadmap", "stakeholder",
+        # Non-SWE target titles (Nov 2026) — see TARGET_TITLE_RE.
+        "cloud", "linux", "networking", "troubleshooting", "technical support",
+        "help desk", "active directory", "customer-facing", "client-facing",
+        "implementation", "consulting", "project management",
+        "quality assurance", "test automation", "selenium", "documentation",
+        "technical writing", "jira", "salesforce", "servicenow", "crm",
+        "financial modeling", "forecasting", "quantitative", "probability",
     ],
     # Weighted higher than everything else — explicitly Seattle + remote per Giri's ask.
     "preferred_locations": [
@@ -45,7 +52,7 @@ PROFILE = {
     "avoid_signals": [
         "master's degree required", "msc required", "security clearance",
         "must be a us citizen", "citizenship required",
-        "5+ years", "7+ years", "10+ years",
+        "3+ years", "4+ years", "5+ years", "7+ years", "10+ years",
     ],
 }
 
@@ -467,6 +474,82 @@ INTERNSHIP_TITLE_RE = re.compile(
     r"fellow(ship)?s?)\b"
 )
 
+# Entry-level non-SWE titles a CS grad is also hireable for (Nov 2026
+# widening). A title matching this qualifies on its own — no intern/new-grad
+# label needed — and is exempt from NON_TECHNICAL_ROLE_RE (so "Financial
+# Analyst" / "Sales Development Representative" survive). Security roles are
+# deliberately absent: they stay excluded by DOMAIN_EXCLUDE_RE. Bare "APM" is
+# also absent — Datadog's "Manager I, Engineering - APM Serverless" means
+# Application Performance Monitoring, not Associate Product Manager.
+TARGET_TITLE_RE = re.compile(
+    r"(?i)\b("
+    # AI / customer engineering
+    r"forward[- ]deployed|applied ai engineer|deployment engineer|"
+    r"solutions? engineer|sales engineer|pre-?sales engineer|customer engineer|"
+    r"technical account manager|solutions? architect|"
+    # AI evaluation
+    r"ai (data|evaluation|trainer|training)|llm evaluat\w*|"
+    # Cloud / IT
+    r"cloud support|cloud engineer|support engineer|technical support engineer|"
+    r"systems? administrator|sysadmin|systems? analyst|it analyst|it specialist|"
+    r"network engineer|data center technician|database administrator|"
+    # Data
+    r"data analyst|business intelligence|bi analyst|bi developer|"
+    r"product analyst|analytics engineer|reporting analyst|"
+    # Product / program
+    r"associate product manager|technical program manager|product operations|"
+    r"technical project (coordinator|manager)|"
+    # Consulting
+    r"technology analyst|technology consultant|technical consultant|"
+    r"implementation (consultant|specialist|engineer)|business systems analyst|"
+    r"salesforce (admin|administrator|developer)|servicenow|"
+    # QA / docs
+    r"qa engineer|quality assurance|test engineer|sdet|"
+    r"software development engineer in test|technical writer|"
+    r"developer advocate|developer relations|"
+    # Hardware
+    r"validation engineer|applications engineer|product test engineer|"
+    # Business
+    r"business analyst|operations analyst|supply chain analyst|strategy analyst|"
+    r"management consultant|associate consultant|"
+    # Finance
+    r"financial analyst|risk analyst|quant(itative)? analyst|actuarial analyst|"
+    r"underwriting analyst|"
+    # Sales / marketing
+    r"business development representative|sales development representative|"
+    r"bdr|sdr|marketing coordinator|growth analyst|product marketing associate|"
+    # Recruiting / HR
+    r"technical recruiter|recruiting coordinator|hr operations|"
+    # Patent / legal
+    r"patent examiner|patent agent|e-?discovery|legal specialist|"
+    # Government / education / health / general
+    r"intelligence analyst|program analyst|management analyst|"
+    r"instructional designer|curriculum developer|health informatics|"
+    r"clinical applications analyst|project coordinator|"
+    r"customer success (manager|associate)|operations associate"
+    r")\b"
+)
+
+# Target titles whose literal job name contains "manager" — SENIORITY_AVOID_RE's
+# bare "manager" shouldn't kill these, but other seniority words still do
+# ("Senior Technical Program Manager" stays blocked).
+MANAGER_TARGET_TITLE_RE = re.compile(
+    r"(?i)\b(associate product manager|technical account manager|"
+    r"technical (program|project) manager|customer success manager)\b"
+)
+
+
+def title_is_target(title: str) -> bool:
+    return bool(TARGET_TITLE_RE.search(title or ""))
+
+
+def title_qualifies(title: str) -> bool:
+    return bool(INTERNSHIP_TITLE_RE.search(title or "")) or title_is_target(title)
+
+
+def is_non_technical(title: str) -> bool:
+    return bool(NON_TECHNICAL_ROLE_RE.search(title or "")) and not title_is_target(title)
+
 # "Early career"/"intern"/"fellow" also gets used for recruiting, sales, HR,
 # finance, and legal reqs on these boards (e.g. "Finance Fellow", "HRIS
 # Analyst", "Legal Fellow") — exclude non-engineering/non-data functions
@@ -504,6 +587,21 @@ SENIORITY_AVOID_RE = re.compile(
     r"founding|chief technology officer|\bcto\b|head of|"
     r"postdoc(toral)?|research scientist)\b"
 )
+
+
+def seniority_blocks(title: str) -> str | None:
+    """Returns the seniority word that disqualifies `title`, or None. An
+    intern/co-op/fellowship/new-grad label overrides it (see above). A bare
+    "manager" is also forgiven when it's part of a MANAGER_TARGET_TITLE_RE
+    phrase — the rest of the title is re-checked with that phrase removed."""
+    hit = SENIORITY_AVOID_RE.search(title or "")
+    if not hit or INTERNSHIP_TITLE_RE.search(title):
+        return None
+    hits = {m.group(0).lower() for m in SENIORITY_AVOID_RE.finditer(title)}
+    if hits == {"manager"} and MANAGER_TARGET_TITLE_RE.search(title):
+        rest_hit = SENIORITY_AVOID_RE.search(MANAGER_TARGET_TITLE_RE.sub(" ", title))
+        return rest_hit.group(0) if rest_hit else None
+    return hit.group(0)
 
 # GRAD-DEGREE — never overridable, regardless of "intern" appearing in the
 # same title. A posting can be both an internship AND require a graduate
@@ -1052,11 +1150,11 @@ def _cheap_title_survives(title: str) -> bool:
     details call. Not a substitute for score_job()'s real hard filters
     (which still run once description text is available) - just avoids
     fetching details for titles that would obviously fail anyway."""
-    if SENIORITY_AVOID_RE.search(title) and not INTERNSHIP_TITLE_RE.search(title):
+    if seniority_blocks(title):
         return False
     if GRAD_DEGREE_AVOID_RE.search(title):
         return False
-    if NON_TECHNICAL_ROLE_RE.search(title):
+    if is_non_technical(title):
         return False
     return True
 
@@ -1071,6 +1169,7 @@ STARBUCKS_COMPANY = {
 STARBUCKS_QUERIES = [
     "Software Engineer", "Software Development Engineer",
     "Data Engineer", "Machine Learning Engineer",
+    "Data Analyst", "Business Analyst", "Solutions Engineer",
 ]
 
 
@@ -1150,7 +1249,10 @@ def fetch_starbucks(company: dict) -> list[dict]:
 # per company (both visible in a careers page's HTML as data-apibaseurl /
 # data-sitenumber) and careers_base for building real apply links, so more
 # Oracle-ORC companies can be added later without new fetch logic.
-ORACLE_ORC_QUERIES = ["Software Engineer", "Software Development Engineer", "Data Engineer", "Data Scientist"]
+ORACLE_ORC_QUERIES = [
+    "Software Engineer", "Software Development Engineer", "Data Engineer", "Data Scientist",
+    "Data Analyst", "Business Analyst", "Financial Analyst", "Technology Analyst",
+]
 
 ORACLE_ORC_COMPANIES = [
     {
@@ -1257,8 +1359,8 @@ def scrape_jobs() -> list[dict]:
             jobs = fetcher(company)
             internship_jobs = [
                 j for j in jobs
-                if INTERNSHIP_TITLE_RE.search(j["title"])
-                and not NON_TECHNICAL_ROLE_RE.search(j["title"])
+                if title_qualifies(j["title"])
+                and not is_non_technical(j["title"])
             ]
             print(f"{company['name']:28s} ({company['platform']:10s}): "
                   f"{len(jobs):4d} total, {len(internship_jobs):3d} internship-tagged")
@@ -1275,8 +1377,8 @@ def scrape_jobs() -> list[dict]:
         simplify_jobs = fetch_simplify()
         internship_jobs = [
             j for j in simplify_jobs
-            if INTERNSHIP_TITLE_RE.search(j["title"])
-            and not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            if title_qualifies(j["title"])
+            and not is_non_technical(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
         print(f"{'SimplifyJobs aggregator':28s} ({'simplify':10s}): "
@@ -1292,7 +1394,7 @@ def scrape_jobs() -> list[dict]:
         yc_jobs = fetch_yc()
         qualifying_jobs = [
             j for j in yc_jobs
-            if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            if not is_non_technical(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
         print(f"{'Y Combinator (WaaS)':28s} ({'yc':10s}): "
@@ -1308,7 +1410,7 @@ def scrape_jobs() -> list[dict]:
         uw_jobs = fetch_uw()
         qualifying_jobs = [
             j for j in uw_jobs
-            if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            if not is_non_technical(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
         print(f"{'UW Career Center':28s} ({'uw':10s}): "
@@ -1326,7 +1428,7 @@ def scrape_jobs() -> list[dict]:
         starbucks_jobs = fetch_starbucks(STARBUCKS_COMPANY)
         qualifying_jobs = [
             j for j in starbucks_jobs
-            if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+            if not is_non_technical(j["title"])
             and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
         ]
         print(f"{'Starbucks':28s} ({'starbucks':10s}): "
@@ -1341,7 +1443,7 @@ def scrape_jobs() -> list[dict]:
             oracle_jobs = fetch_oracle_orc(oracle_company)
             qualifying_jobs = [
                 j for j in oracle_jobs
-                if not NON_TECHNICAL_ROLE_RE.search(j["title"])
+                if not is_non_technical(j["title"])
                 and (j["companyName"].lower(), j["title"].lower()) not in seen_pairs
             ]
             print(f"{oracle_company['name']:28s} ({'oracle_orc':10s}): "
@@ -1399,9 +1501,9 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     # "manager" is also just the literal job title for Product roles at any
     # level — "Product Manager Summer 2027 Intern" was getting killed by the
     # bare "manager" match despite plainly self-labeling as an internship.
-    seniority_hit = SENIORITY_AVOID_RE.search(title)
-    if seniority_hit and not INTERNSHIP_TITLE_RE.search(title):
-        return 0, [f"filtered: '{seniority_hit.group(0)}' in title"]
+    seniority_hit = seniority_blocks(title)
+    if seniority_hit:
+        return 0, [f"filtered: '{seniority_hit}' in title"]
 
     # Grad-degree: never overridable — a posting can be both an internship
     # AND require a graduate degree ("... Internship ... PhD Student ...").
@@ -1485,6 +1587,14 @@ def score_job(job: dict) -> tuple[int, list[str]]:
     elif re.search(r"co-?op", title):
         score += 20
         reasons.append("Co-op title")
+    elif title_is_target(title) and re.search(
+            r"\b(associate|junior|jr\.?|entry[- ]level|level\s*1|graduate|grad)\b"
+            r"|(?<![a-z0-9])(i|1)(?![a-z0-9])", title):
+        score += 25
+        reasons.append("Target role (entry-level title)")
+    elif title_is_target(title):
+        score += 20
+        reasons.append("Target role")
     elif job["id"].startswith("yc:"):
         # YC full-time postings rarely say "new grad" explicitly even when
         # they're accessible — SENIORITY_AVOID_RE already screened out

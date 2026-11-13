@@ -119,6 +119,39 @@ Giri is now a senior graduating May 2027, targeting New Grad roles rather than c
 ### Recency: hard 7-day cutoff, not just a scoring bonus
 Previously, an old posting just scored lower (2-20 pts based on age) but was never actually excluded — a 4-month-old posting could still clear the 55-point bar on strong skill/location match alone. `MAX_POSTING_AGE_DAYS = 7` is now a hard filter checked alongside the other never-overridable filters (grad-degree, underclassman, domain, US-only): anything with a known post date older than 7 days is dropped outright, regardless of how well it otherwise scores. Sources with no parseable date at all (YC, Y Combinator's listings; UW's featured-jobs board) can't be proven stale, so they're not dropped by this — same "absence of a signal isn't treated as a violation of it" reasoning used everywhere else in this file. The 0-20 point recency *scoring* still exists for everything that survives the cutoff, now just rewarding "posted ≤2 days ago" over "posted 3-7 days ago" rather than tiering across weeks/months that can no longer appear at all.
 
+### Nov 2026: widened to non-SWE target titles
+The tracker no longer looks only for internship and new-grad SWE titles. `TARGET_TITLE_RE` adds entry-level roles a CS grad is also hireable for:
+- AI / customer engineering (solutions/sales/forward-deployed engineer, technical account manager)
+- AI evaluation
+- cloud / IT support
+- data / BI analyst
+- product / program (APM, TPM)
+- consulting (technology analyst, implementation, Salesforce/ServiceNow)
+- QA / technical writing / devrel
+- hardware validation
+- business / finance analyst
+- SDR/BDR
+- technical recruiting
+- patent examiner / eDiscovery
+- government / education / health analyst roles
+
+A target title qualifies on its own, without an intern or new-grad label. It's also exempt from `NON_TECHNICAL_ROLE_RE`, so "Financial Analyst" and "Sales Development Representative" now survive.
+
+Seniority rules:
+- **Still enforced:** `seniority_blocks()` applies `SENIORITY_AVOID_RE` as before. "Senior Solutions Engineer" and "Lead Data Analyst" are dropped.
+- **One exception for "manager":** a bare "manager" is forgiven when it's part of a manager-named target title (`MANAGER_TARGET_TITLE_RE`: associate product manager, technical account/program/project manager, customer success manager). The rest of the title is re-checked, so "Senior Technical Program Manager" is still blocked.
+- **No security roles:** none were added. They stay excluded by `DOMAIN_EXCLUDE_RE`.
+- **No bare "APM":** it was left out on purpose. Datadog's "APM Serverless" means Application Performance Monitoring.
+
+Scoring:
+- A target title earns 25 role-fit points if it also reads entry-level (associate / junior / entry-level / I / 1 / grad), otherwise 20.
+- `PROFILE["skills"]` gained cloud/IT, consulting, QA, CRM and finance terms.
+- "3+ years" and "4+ years" are new penalty signals.
+
+Also:
+- Starbucks and American Express searches now include analyst and solutions-engineer queries.
+- `jobs.xlsx` was reset (headers kept) so the sheet rebuilds under the new rules.
+
 ## How filtering + scoring works
 
 1. **Title filter** — only postings whose title contains `intern`, `co-op`, `new grad`, or `early career` survive at all (drops the senior/staff SWE postings that are also on these boards).
